@@ -22,9 +22,9 @@ export class InversifyNavigator {
     private diagnostics: vscode.DiagnosticCollection
   ) {
     this.bindingScanner = new BindingScanner(outputChannel, diagnostics);
-    this.serviceIndexer = new ServiceIndexer(outputChannel);
-    this.injectionMapper = new InjectionMapper(outputChannel);
-    this.navigator = new Navigator(outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper);
+    this.serviceIndexer = new ServiceIndexer(outputChannel, this.bindingScanner.getIgnoreMatcher());
+    this.injectionMapper = new InjectionMapper(outputChannel, this.bindingScanner.getIgnoreMatcher());
+    this.navigator = new Navigator(outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper, this.bindingScanner.getIgnoreMatcher());
   }
 
   setStatusBarItem(statusBarItem: vscode.StatusBarItem) {
@@ -85,7 +85,7 @@ export class InversifyNavigator {
     await this.injectionMapper.mapInjections(progress);
 
     // Update navigator with new data
-    this.navigator = new Navigator(this.outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper);
+    this.navigator = new Navigator(this.outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper, this.bindingScanner.getIgnoreMatcher());
 
     this.outputChannel.appendLine(
       `${EXTENSION_NAME} initialization complete: ${this.getBindingsCount()} bindings, ${this.serviceMap.size} services`

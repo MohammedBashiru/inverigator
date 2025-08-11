@@ -3,14 +3,20 @@ import * as path from 'path';
 import { Binding, BindingsMap, ServiceMap } from '../types';
 import { searchForClass } from '../utils/fileUtils';
 import { InjectionMapper } from './InjectionMapper';
+import { IgnorePatternMatcher } from '../utils/ignorePatterns';
 
 export class Navigator {
+  private ignoreMatcher: IgnorePatternMatcher;
+  
   constructor(
     private outputChannel: vscode.OutputChannel,
     private bindingsMap: BindingsMap,
     private serviceMap: ServiceMap,
-    private injectionMapper?: InjectionMapper
-  ) {}
+    private injectionMapper?: InjectionMapper,
+    ignoreMatcher?: IgnorePatternMatcher
+  ) {
+    this.ignoreMatcher = ignoreMatcher || new IgnorePatternMatcher();
+  }
 
   setInjectionMapper(mapper: InjectionMapper) {
     this.injectionMapper = mapper;
@@ -347,7 +353,7 @@ export class Navigator {
     }
     
     // Search for the implementation file
-    const foundFiles = await searchForClass(implName);
+    const foundFiles = await searchForClass(implName, this.ignoreMatcher);
 
     if (foundFiles.length === 0) {
       vscode.window.showErrorMessage(`Implementation file not found for: ${implName}`);
@@ -425,7 +431,7 @@ export class Navigator {
       }
       
       // If not in service map, try to search for it
-      const foundFiles = await searchForClass(implName);
+      const foundFiles = await searchForClass(implName, this.ignoreMatcher);
       if (foundFiles.length > 0) {
         return { file: foundFiles[0].fsPath, line: 0 };
       }
@@ -469,7 +475,7 @@ export class Navigator {
       fileUri = vscode.Uri.file(serviceInfo.file);
     } else {
       // Try to search for the implementation
-      const foundFiles = await searchForClass(implName);
+      const foundFiles = await searchForClass(implName, this.ignoreMatcher);
       if (foundFiles.length === 0) {
         vscode.window.showErrorMessage(`Implementation file not found for ${implName}`);
         return;

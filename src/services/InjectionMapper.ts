@@ -4,6 +4,7 @@ import * as path from 'path';
 import { createSourceFile } from '../utils/astUtils';
 import { findFiles } from '../utils/fileUtils';
 import { FILE_PATTERNS } from '../constants';
+import { IgnorePatternMatcher } from '../utils/ignorePatterns';
 
 export interface InjectionInfo {
   propertyName: string;
@@ -17,8 +18,11 @@ export class InjectionMapper {
   private interfaceToTokenMap: Map<string, string> = new Map();
   private propertyToInterfaceMap: Map<string, InjectionInfo> = new Map();
   private tokenToInterfaceMap: Map<string, string> = new Map();
+  private ignoreMatcher: IgnorePatternMatcher;
 
-  constructor(private outputChannel: vscode.OutputChannel) {}
+  constructor(private outputChannel: vscode.OutputChannel, ignoreMatcher?: IgnorePatternMatcher) {
+    this.ignoreMatcher = ignoreMatcher || new IgnorePatternMatcher();
+  }
 
   async mapInjections(progress?: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
     this.interfaceToTokenMap.clear();
@@ -26,7 +30,7 @@ export class InjectionMapper {
     this.tokenToInterfaceMap.clear();
 
     // Scan all TypeScript files for @inject decorators
-    const tsFiles = await findFiles(FILE_PATTERNS.typescript);
+    const tsFiles = await findFiles(FILE_PATTERNS.typescript, this.ignoreMatcher);
     
     for (const file of tsFiles) {
       try {

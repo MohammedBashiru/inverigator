@@ -4,17 +4,21 @@ import { ServiceInfo, ServiceMap } from '../types';
 import { FILE_PATTERNS, PATTERNS } from '../constants';
 import { createSourceFile, hasDecorator, getClassName, getMethodNames } from '../utils/astUtils';
 import { findFiles } from '../utils/fileUtils';
+import { IgnorePatternMatcher } from '../utils/ignorePatterns';
 
 export class ServiceIndexer {
   private serviceMap: ServiceMap = new Map();
+  private ignoreMatcher: IgnorePatternMatcher;
 
-  constructor(private outputChannel: vscode.OutputChannel) {}
+  constructor(private outputChannel: vscode.OutputChannel, ignoreMatcher?: IgnorePatternMatcher) {
+    this.ignoreMatcher = ignoreMatcher || new IgnorePatternMatcher();
+  }
 
   async indexServices(progress?: vscode.Progress<{ message?: string; increment?: number }>): Promise<ServiceMap> {
     this.serviceMap.clear();
     
     // Scan all TypeScript files for service classes
-    const tsFiles = await findFiles(FILE_PATTERNS.typescript);
+    const tsFiles = await findFiles(FILE_PATTERNS.typescript, this.ignoreMatcher);
     
     for (const file of tsFiles) {
       try {

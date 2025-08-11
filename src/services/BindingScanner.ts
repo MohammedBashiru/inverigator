@@ -26,7 +26,10 @@ export class BindingScanner {
     this.ignoreMatcher = new IgnorePatternMatcher();
     const info = this.ignoreMatcher.getInfo();
     if (info.hasIgnoreFile) {
-      this.outputChannel.appendLine(`Loaded .inverigatorignore file with ${info.patternCount} patterns`);
+      this.outputChannel.appendLine(`Loaded .inverigatorignore file with ${info.customPatternCount} custom patterns`);
+      this.outputChannel.appendLine(`Total ignore patterns (default + custom): ${info.totalPatternCount}`);
+    } else {
+      this.outputChannel.appendLine(`No .inverigatorignore file found. Using ${info.totalPatternCount} default patterns`);
     }
     
     // Initialize cache service if we have a workspace
@@ -107,7 +110,7 @@ export class BindingScanner {
     // Also scan any explicitly configured patterns (like container.ts)
     // These might have configuration without direct bindings
     for (const pattern of patterns) {
-      const files = await findFiles(pattern);
+      const files = await findFiles(pattern, this.ignoreMatcher);
       const nonTestFiles = files.filter(f => !this.isTestFile(f.fsPath));
       
       if (nonTestFiles.length > 0) {
@@ -247,7 +250,7 @@ export class BindingScanner {
     
     for (const pattern of FILE_PATTERNS.registry) {
       const globPattern = path.join(dir, pattern).replace(/\\/g, '/');
-      const foundFiles = await findFiles(vscode.workspace.asRelativePath(globPattern));
+      const foundFiles = await findFiles(vscode.workspace.asRelativePath(globPattern), this.ignoreMatcher);
       files.push(...foundFiles.map(f => f.fsPath));
     }
     
@@ -604,7 +607,8 @@ export class BindingScanner {
     }
     
     // Search for TypeScript files that likely contain bindings
-    const allTsFiles = await findFiles('**/*.{ts,tsx}');
+    // Now using ignoreMatcher directly in findFiles for efficient exclusion
+    const allTsFiles = await findFiles('**/*.{ts,tsx}', this.ignoreMatcher);
     
     // Use ignore patterns to filter files
     const candidateFiles = this.ignoreMatcher.filterFiles(allTsFiles);
@@ -729,5 +733,9 @@ export class BindingScanner {
       return await this.cacheService.cacheExists();
     }
     return false;
+  }
+  
+  getIgnoreMatcher(): IgnorePatternMatcher {
+    return this.ignoreMatcher;
   }
 }

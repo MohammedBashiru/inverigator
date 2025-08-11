@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import * as ts from 'typescript';
+import { IgnorePatternMatcher } from './ignorePatterns';
 
 // Cache for tsconfig to avoid reading it multiple times
 let tsconfigCache: { compilerOptions?: ts.CompilerOptions; baseUrl?: string } | null = null;
@@ -120,8 +121,16 @@ function tryResolveWithExtensions(resolvedPath: string): string | null {
   return null;
 }
 
-export async function findFiles(pattern: string, exclude?: string): Promise<vscode.Uri[]> {
-  return vscode.workspace.findFiles(pattern, exclude || '**/node_modules/**');
+export async function findFiles(pattern: string, exclude?: string | IgnorePatternMatcher): Promise<vscode.Uri[]> {
+  let excludePattern: string;
+  
+  if (exclude instanceof IgnorePatternMatcher) {
+    excludePattern = exclude.getExcludeGlob();
+  } else {
+    excludePattern = exclude || '**/node_modules/**';
+  }
+  
+  return vscode.workspace.findFiles(pattern, excludePattern);
 }
 
 export function camelToKebab(str: string): string {
@@ -132,7 +141,7 @@ export function camelToSnake(str: string): string {
   return str.replace(/([a-z0-9]|(?=[A-Z]))([A-Z])/g, '$1_$2').toLowerCase();
 }
 
-export async function searchForClass(className: string): Promise<vscode.Uri[]> {
+export async function searchForClass(className: string, ignoreMatcher?: IgnorePatternMatcher): Promise<vscode.Uri[]> {
   const searchPatterns = [
     `**/${className}.ts`,
     `**/${className}.js`,
@@ -146,7 +155,7 @@ export async function searchForClass(className: string): Promise<vscode.Uri[]> {
   let foundFiles: vscode.Uri[] = [];
   
   for (const pattern of searchPatterns) {
-    const files = await findFiles(pattern);
+    const files = await findFiles(pattern, ignoreMatcher);
     foundFiles.push(...files);
     if (foundFiles.length > 0) {
       break;
@@ -155,7 +164,7 @@ export async function searchForClass(className: string): Promise<vscode.Uri[]> {
 
   // If not found by filename, search content
   if (foundFiles.length === 0) {
-    const allTsFiles = await findFiles('**/*.{ts,tsx}');
+    const allTsFiles = await findFiles('**/*.{ts,tsx}', ignoreMatcher);
     
     for (const file of allTsFiles) {
       const content = fs.readFileSync(file.fsPath, 'utf-8');
