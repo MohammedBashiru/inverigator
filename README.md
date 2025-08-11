@@ -1,10 +1,18 @@
-# Inverigator
+<div align="center">
+  <img src="icon.png" alt="Inverigator Logo" width="128" height="128">
+  
+  # Inverigator
 
-> Navigate InversifyJS dependency injections with ease
+  > Navigate InversifyJS dependency injections with ease
+</div>
+
+<div align="center">
 
 [![Version](https://img.shields.io/visual-studio-marketplace/v/inverigator)](https://marketplace.visualstudio.com/items?itemName=inverigator)
 [![Downloads](https://img.shields.io/visual-studio-marketplace/d/inverigator)](https://marketplace.visualstudio.com/items?itemName=inverigator)
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/inverigator)](https://marketplace.visualstudio.com/items?itemName=inverigator)
+
+</div>
 
 Inverigator is a powerful VS Code extension that helps developers navigate InversifyJS dependency injection containers. Jump instantly from injected dependencies to their concrete implementations, making it easier to understand and work with complex IoC container setups.
 
@@ -325,5 +333,5 @@ This extension is licensed under the [MIT License](LICENSE).
 
 If you find this extension helpful, please consider:
 - ⭐ Starring the repository on [GitHub](https://github.com/MohammedBashiru/inverigator)
-- 📝 Leaving a review on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=inverigator)
+- 📝 Leaving a review on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=MohammedBashiru.inverigator)
 - 🐛 Reporting issues or suggesting features
