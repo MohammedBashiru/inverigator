@@ -122,6 +122,14 @@ export class InversifyNavigator {
     await this.navigator.goToImplementation();
   }
 
+  async goToImplementationForToken(token: string) {
+    await this.navigator.goToImplementationForToken(token);
+  }
+
+  async getImplementationLocation(token: string): Promise<{ file: string; line: number } | undefined> {
+    return await this.navigator.getImplementationLocation(token);
+  }
+
   async showBindings() {
     await this.navigator.showBindings();
   }

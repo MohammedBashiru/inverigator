@@ -42,6 +42,11 @@
         "title": "Generate .inverigatorignore File",
         "icon": "$(new-file)",
         "category": "Inverigator"
+      },
+      {
+        "command": "inverigator.goToImplementationWithToken",
+        "title": "Go to Implementation (With Token)",
+        "category": "Inverigator"
       }
     ],
     "configuration": {
@@ -70,6 +75,11 @@
           "minimum": 1,
           "maximum": 10,
           "description": "Maximum depth to follow imports when scanning for bindings in modular containers"
+        },
+        "inverigator.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show clickable 'Go to Implementation' links above InversifyJS injections and bindings"
         }
       }
     },
@@ -121,15 +131,21 @@
     "keybindings": [
       {
         "command": "inversifyNavigator.goToImplementation",
-        "key": "f12",
+        "key": "ctrl+alt+f12",
         "when": "editorTextFocus && !editorReadonly",
-        "mac": "f12"
+        "mac": "cmd+alt+f12"
       },
       {
         "command": "inversifyNavigator.goToImplementation",
-        "key": "ctrl+f12",
+        "key": "alt+f12",
         "when": "editorTextFocus && !editorReadonly",
-        "mac": "cmd+f12"
+        "mac": "alt+f12"
+      },
+      {
+        "command": "inversifyNavigator.goToImplementation",
+        "key": "ctrl+alt+i",
+        "when": "editorTextFocus && !editorReadonly",
+        "mac": "cmd+alt+i"
       }
     ]
   },

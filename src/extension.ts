@@ -4,6 +4,8 @@ import * as path from 'path';
 import { InversifyNavigator } from './core/InversifyNavigator';
 import { COMMANDS, OUTPUT_CHANNEL_NAME, DIAGNOSTIC_SOURCE, EXTENSION_NAME } from './constants';
 import { IgnorePatternMatcher } from './utils/ignorePatterns';
+import { InversifyHoverProvider } from './providers/InversifyHoverProvider';
+import { InversifyCodeLensProvider } from './providers/InversifyCodeLensProvider';
 
 let navigator: InversifyNavigator | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
@@ -48,10 +50,35 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
+  // Register hover provider to show implementation info
+  const hoverProvider = new InversifyHoverProvider(navigator);
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(
+      [{ scheme: 'file', language: 'typescript' }, { scheme: 'file', language: 'javascript' }],
+      hoverProvider
+    )
+  );
+
+  // Register CodeLens provider for clickable inline links
+  const codeLensProvider = new InversifyCodeLensProvider(navigator);
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      [{ scheme: 'file', language: 'typescript' }, { scheme: 'file', language: 'javascript' }],
+      codeLensProvider
+    )
+  );
+
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.goToImplementation, () => {
       navigator?.goToImplementation();
+    })
+  );
+
+  // Register command for CodeLens with token parameter
+  context.subscriptions.push(
+    vscode.commands.registerCommand('inverigator.goToImplementationWithToken', (token: string) => {
+      navigator?.goToImplementationForToken(token);
     })
   );
 

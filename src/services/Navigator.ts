@@ -16,6 +16,36 @@ export class Navigator {
     this.injectionMapper = mapper;
   }
 
+  async goToImplementationForToken(token: string) {
+    this.outputChannel.appendLine(`\n=== Navigation Request (from CodeLens) ===`);
+    this.outputChannel.appendLine(`Looking for token: '${token}'`);
+    
+    // First, check if this is an interface that maps to a token
+    if (this.injectionMapper && token.startsWith('I')) {
+      const mappedToken = this.injectionMapper.getTokenForInterface(token);
+      if (mappedToken) {
+        this.outputChannel.appendLine(`Interface ${token} maps to token ${mappedToken}`);
+        token = mappedToken;
+      }
+    }
+    
+    // Look for direct token binding
+    const bindings = this.bindingsMap.get(token);
+    if (bindings && bindings.length > 0) {
+      await this.handleBindings(bindings, token);
+      return;
+    }
+    
+    // Also check if token is itself an implementation class name
+    const serviceInfo = this.serviceMap.get(token);
+    if (serviceInfo) {
+      await this.openFileAndNavigate(vscode.Uri.file(serviceInfo.file), token);
+      return;
+    }
+    
+    vscode.window.showErrorMessage(`No implementation found for: ${token}`);
+  }
+
   async goToImplementation() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
@@ -340,6 +370,47 @@ export class Navigator {
         vscode.TextEditorRevealType.InCenter
       );
     }
+  }
+
+  async getImplementationLocation(token: string): Promise<{ file: string; line: number } | undefined> {
+    this.outputChannel.appendLine(`Looking for implementation of token: ${token}`);
+    
+    // First, check if this is an interface that maps to a token
+    if (this.injectionMapper && token.startsWith('I')) {
+      const mappedToken = this.injectionMapper.getTokenForInterface(token);
+      if (mappedToken) {
+        token = mappedToken;
+        this.outputChannel.appendLine(`Interface ${token} maps to token ${mappedToken}`);
+      }
+    }
+    
+    // Look for direct token binding
+    const bindings = this.bindingsMap.get(token);
+    if (bindings && bindings.length > 0) {
+      const binding = bindings[0]; // Return first binding for Alt+Click
+      
+      // Try to find the implementation class file
+      const implName = binding.implementation;
+      const serviceInfo = this.serviceMap.get(implName);
+      
+      if (serviceInfo) {
+        return { file: serviceInfo.file, line: 0 };
+      }
+      
+      // If not in service map, try to search for it
+      const foundFiles = await searchForClass(implName);
+      if (foundFiles.length > 0) {
+        return { file: foundFiles[0].fsPath, line: 0 };
+      }
+    }
+    
+    // Also check if token is itself an implementation class name
+    const serviceInfo = this.serviceMap.get(token);
+    if (serviceInfo) {
+      return { file: serviceInfo.file, line: 0 };
+    }
+    
+    return undefined;
   }
 
   async showBindings() {
