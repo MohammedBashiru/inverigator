@@ -27,11 +27,33 @@ This is a VS Code extension called "inverigator" that helps developers navigate 
 
 ## Architecture
 
-### Key Files
-- `src/extension.ts` - Main extension entry point containing activate/deactivate functions
-- `package.json` - Extension manifest defining commands, activation events, and contributions
-- `esbuild.js` - Build configuration for bundling the extension
-- `dist/extension.js` - Compiled and bundled extension output
+### Modular Structure
+The extension follows a clean, professional architecture with separation of concerns:
+
+```
+src/
+├── constants/          # Configuration constants and patterns
+│   └── index.ts       # All constants in one place
+├── core/              # Core orchestration logic
+│   └── InversifyNavigator.ts  # Main coordinator class
+├── services/          # Business logic services
+│   ├── BindingScanner.ts     # Scans for InversifyJS bindings
+│   ├── Navigator.ts          # Handles navigation logic
+│   └── ServiceIndexer.ts     # Indexes service classes
+├── types/             # TypeScript type definitions
+│   └── index.ts      # Interfaces and type aliases
+├── utils/             # Utility functions
+│   ├── astUtils.ts   # AST parsing utilities
+│   └── fileUtils.ts  # File system utilities
+└── extension.ts       # VS Code extension entry point
+```
+
+### Key Components
+- **InversifyNavigator**: Main coordinator that orchestrates all services
+- **BindingScanner**: Recursively scans container files for bindings
+- **ServiceIndexer**: Indexes all service classes for quick lookup
+- **Navigator**: Handles the actual navigation logic
+- **Utils**: Reusable utilities for AST parsing and file operations
 
 ### Extension Structure
 The extension follows the standard VS Code extension architecture:
