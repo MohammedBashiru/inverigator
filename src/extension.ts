@@ -14,6 +14,8 @@ class InversifyNavigator {
   private bindingsMap: Map<string, Binding[]> = new Map();
   private diagnostics: vscode.DiagnosticCollection;
   private outputChannel: vscode.OutputChannel;
+  private processedFiles: Set<string> = new Set();
+  private importedFunctions: Set<string> = new Set();
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -31,34 +33,62 @@ class InversifyNavigator {
 
   private async scanAllContainers() {
     this.bindingsMap.clear();
+    this.processedFiles.clear();
+    this.importedFunctions.clear();
+
     const config = vscode.workspace.getConfiguration('inverigator');
     const patterns = config.get<string[]>('containerPaths') || ['**/container.ts'];
+    const scanDepth = config.get<number>('maxScanDepth', 5);
 
     for (const pattern of patterns) {
       const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**');
       for (const file of files) {
-        await this.scanContainerFile(file.fsPath);
+        await this.scanContainerFile(file.fsPath, 0, scanDepth);
       }
     }
 
-    this.outputChannel.appendLine(`Found ${this.bindingsMap.size} bindings across ${patterns.length} container patterns`);
+    this.outputChannel.appendLine(
+      `Found ${this.bindingsMap.size} bindings across ${this.processedFiles.size} files`
+    );
   }
 
-  private async scanContainerFile(filePath: string) {
+  private async scanContainerFile(filePath: string, depth: number, maxDepth: number) {
+    if (this.processedFiles.has(filePath) || depth > maxDepth) {
+      return;
+    }
+
+    this.processedFiles.add(filePath);
+
     try {
       if (!fs.existsSync(filePath)) {
         return;
       }
 
       const source = fs.readFileSync(filePath, 'utf-8');
-      const sourceFile = ts.createSourceFile(
-        filePath,
-        source,
-        ts.ScriptTarget.Latest,
-        true
-      );
+      const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
 
+      // Parse bindings in this file
       this.parseBindings(sourceFile, filePath);
+
+      // Find and follow imported registry/configuration functions
+      const importedModules = this.findImportedModules(sourceFile, filePath);
+
+      // Find function calls that might configure sub-containers
+      const functionCalls = this.findConfigurationFunctionCalls(sourceFile);
+
+      // Scan imported modules that contain configuration functions
+      for (const modulePath of importedModules) {
+        if (functionCalls.size > 0) {
+          await this.scanContainerFile(modulePath, depth + 1, maxDepth);
+        }
+      }
+
+      // Also scan files that match registry patterns
+      const dir = path.dirname(filePath);
+      const registryFiles = await this.findRegistryFiles(dir);
+      for (const registryFile of registryFiles) {
+        await this.scanContainerFile(registryFile, depth + 1, maxDepth);
+      }
     } catch (error) {
       this.outputChannel.appendLine(`Error scanning ${filePath}: ${error}`);
       const diagnostic = new vscode.Diagnostic(
@@ -68,6 +98,98 @@ class InversifyNavigator {
       );
       this.diagnostics.set(vscode.Uri.file(filePath), [diagnostic]);
     }
+  }
+
+  private async findRegistryFiles(dir: string): Promise<string[]> {
+    const patterns = [
+      path.join(dir, '**/*registry*.ts'),
+      path.join(dir, '**/*Registry*.ts'),
+      path.join(dir, '**/*bindings*.ts'),
+      path.join(dir, '**/*Bindings*.ts'),
+      path.join(dir, '**/*container*.ts'),
+      path.join(dir, '**/*Container*.ts')
+    ];
+
+    const files: string[] = [];
+    for (const pattern of patterns) {
+      const globPattern = pattern.replace(/\\/g, '/');
+      const foundFiles = await vscode.workspace.findFiles(
+        vscode.workspace.asRelativePath(globPattern),
+        '**/node_modules/**'
+      );
+      files.push(...foundFiles.map(f => f.fsPath));
+    }
+
+    return [...new Set(files)];
+  }
+
+  private findImportedModules(sourceFile: ts.SourceFile, currentFilePath: string): string[] {
+    const imports: string[] = [];
+    const dir = path.dirname(currentFilePath);
+
+    ts.forEachChild(sourceFile, node => {
+      if (ts.isImportDeclaration(node)) {
+        const moduleSpecifier = node.moduleSpecifier;
+        if (ts.isStringLiteral(moduleSpecifier)) {
+          const importPath = moduleSpecifier.text;
+
+          // Track imported functions for configuration detection
+          if (node.importClause && node.importClause.namedBindings) {
+            if (ts.isNamedImports(node.importClause.namedBindings)) {
+              node.importClause.namedBindings.elements.forEach(element => {
+                const name = element.name.getText(sourceFile);
+                if (name.includes('Registry') || name.includes('Configure')) {
+                  this.importedFunctions.add(name);
+                }
+              });
+            }
+          }
+
+          // Resolve relative imports
+          if (importPath.startsWith('.')) {
+            const resolvedPath = path.resolve(dir, importPath);
+            // Try different extensions
+            const extensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.js'];
+            for (const ext of extensions) {
+              const fullPath =
+                resolvedPath.endsWith('.ts') || resolvedPath.endsWith('.js')
+                  ? resolvedPath
+                  : resolvedPath + ext;
+              if (fs.existsSync(fullPath)) {
+                imports.push(fullPath);
+                break;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return imports;
+  }
+
+  private findConfigurationFunctionCalls(sourceFile: ts.SourceFile): Set<string> {
+    const functionCalls = new Set<string>();
+
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        const text = node.expression.getText(sourceFile);
+        // Look for configuration function patterns
+        if (
+          text.includes('Configure') ||
+          text.includes('Registry') ||
+          text.includes('register') ||
+          text.includes('Bind') ||
+          this.importedFunctions.has(text)
+        ) {
+          functionCalls.add(text);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+    return functionCalls;
   }
 
   private parseBindings(sourceFile: ts.SourceFile, filePath: string) {
@@ -86,11 +208,15 @@ class InversifyNavigator {
     visit(sourceFile);
   }
 
-  private extractBinding(node: ts.CallExpression, sourceFile: ts.SourceFile, filePath: string): Binding | null {
+  private extractBinding(
+    node: ts.CallExpression,
+    sourceFile: ts.SourceFile,
+    filePath: string
+  ): Binding | null {
     const text = node.expression.getText(sourceFile);
-    
-    // Check for container.bind pattern
-    if (!text.includes('.bind')) {
+
+    // Check for container.bind or just bind pattern
+    if (!text.includes('.bind') && !text.endsWith('bind')) {
       return null;
     }
 
@@ -109,17 +235,21 @@ class InversifyNavigator {
     while (currentNode.parent) {
       if (ts.isPropertyAccessExpression(currentNode.parent)) {
         const propAccess = currentNode.parent;
-        if (propAccess.name.getText(sourceFile) === 'to' && 
-            propAccess.parent && 
-            ts.isCallExpression(propAccess.parent)) {
+        if (
+          propAccess.name.getText(sourceFile) === 'to' &&
+          propAccess.parent &&
+          ts.isCallExpression(propAccess.parent)
+        ) {
           const toCall = propAccess.parent;
           if (toCall.arguments.length > 0) {
             implementation = this.extractIdentifier(toCall.arguments[0], sourceFile);
             break;
           }
         }
-      } else if (ts.isCallExpression(currentNode.parent) && 
-                 currentNode.parent.expression === currentNode) {
+      } else if (
+        ts.isCallExpression(currentNode.parent) &&
+        currentNode.parent.expression === currentNode
+      ) {
         // Continue up the chain
       } else {
         break;
@@ -127,8 +257,19 @@ class InversifyNavigator {
       currentNode = currentNode.parent;
     }
 
+    // Also check for toSelf() pattern
+    if (!implementation && currentNode.parent) {
+      const parentText = currentNode.parent.getText(sourceFile);
+      if (parentText.includes('.toSelf()')) {
+        implementation = token; // Token is its own implementation
+      }
+    }
+
     if (token && implementation) {
       const pos = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+      this.outputChannel.appendLine(
+        `Found binding: ${token} → ${implementation} in ${path.basename(filePath)}`
+      );
       return {
         token,
         implementation,
@@ -142,18 +283,18 @@ class InversifyNavigator {
 
   private extractIdentifier(node: ts.Node, sourceFile: ts.SourceFile): string {
     const text = node.getText(sourceFile);
-    
+
     // Remove quotes if it's a string literal
     if (text.startsWith('"') || text.startsWith("'") || text.startsWith('`')) {
       return text.slice(1, -1);
     }
-    
+
     // Handle Symbol() calls
     if (text.startsWith('Symbol(') || text.startsWith('Symbol.for(')) {
       const match = text.match(/Symbol(?:\.for)?\(['"`](.+?)['"`]\)/);
       return match ? match[1] : text;
     }
-    
+
     return text;
   }
 
@@ -166,16 +307,19 @@ class InversifyNavigator {
     }
 
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.{ts,js}');
-    
-    watcher.onDidChange(async (uri) => {
-      const patterns = config.get<string[]>('containerPaths') || ['**/container.ts'];
-      for (const pattern of patterns) {
-        const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**');
-        if (files.some(f => f.fsPath === uri.fsPath)) {
-          this.outputChannel.appendLine(`Container file changed: ${uri.fsPath}`);
-          await this.scanContainerFile(uri.fsPath);
-          break;
-        }
+
+    watcher.onDidChange(async uri => {
+      // Check if this file is in our processed files or matches patterns
+      if (
+        this.processedFiles.has(uri.fsPath) ||
+        uri.fsPath.includes('registry') ||
+        uri.fsPath.includes('Registry') ||
+        uri.fsPath.includes('container') ||
+        uri.fsPath.includes('Container')
+      ) {
+        this.outputChannel.appendLine(`Related file changed: ${uri.fsPath}`);
+        // Rescan all containers as bindings might have changed
+        await this.scanAllContainers();
       }
     });
 
@@ -202,11 +346,15 @@ class InversifyNavigator {
     if (!bindings || bindings.length === 0) {
       // Try to find partial matches
       const partialMatches = Array.from(this.bindingsMap.keys())
-        .filter(key => key.includes(symbol))
+        .filter(key => key.includes(symbol) || symbol.includes(key))
         .flatMap(key => this.bindingsMap.get(key) || []);
 
       if (partialMatches.length === 0) {
         vscode.window.showErrorMessage(`No Inversify implementation found for: ${symbol}`);
+        this.outputChannel.appendLine(`No binding found for: ${symbol}`);
+        this.outputChannel.appendLine(
+          `Available bindings: ${Array.from(this.bindingsMap.keys()).join(', ')}`
+        );
         return;
       }
 
@@ -241,7 +389,7 @@ class InversifyNavigator {
   private async navigateToImplementation(binding: Binding) {
     // First, try to find the implementation file
     const implName = binding.implementation;
-    
+
     // Search patterns for the implementation
     const searchPatterns = [
       `**/${implName}.ts`,
@@ -265,7 +413,7 @@ class InversifyNavigator {
     if (foundFiles.length === 0) {
       // Try to search for the class/interface definition in all TypeScript files
       const allTsFiles = await vscode.workspace.findFiles('**/*.{ts,tsx}', '**/node_modules/**');
-      
+
       for (const file of allTsFiles) {
         const content = fs.readFileSync(file.fsPath, 'utf-8');
         const classRegex = new RegExp(`(?:export\\s+)?(?:class|interface)\\s+${implName}\\b`);
@@ -313,7 +461,10 @@ class InversifyNavigator {
     if (match) {
       const position = document.positionAt(match.index!);
       editor.selection = new vscode.Selection(position, position);
-      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+      editor.revealRange(
+        new vscode.Range(position, position),
+        vscode.TextEditorRevealType.InCenter
+      );
     }
   }
 
@@ -327,7 +478,7 @@ class InversifyNavigator {
 
   async showBindings() {
     const items: vscode.QuickPickItem[] = [];
-    
+
     this.bindingsMap.forEach((bindings, token) => {
       bindings.forEach(binding => {
         items.push({
@@ -344,34 +495,47 @@ class InversifyNavigator {
     }
 
     await vscode.window.showQuickPick(items, {
-      placeHolder: 'All InversifyJS bindings',
+      placeHolder: `All InversifyJS bindings (${items.length} total)`,
       matchOnDescription: true,
       matchOnDetail: true
     });
   }
 
   async rescan() {
-    vscode.window.showInformationMessage('Rescanning container files...');
+    vscode.window.showInformationMessage('Re-scanning container files...');
     await this.scanAllContainers();
     vscode.window.showInformationMessage(`Found ${this.bindingsMap.size} bindings`);
+  }
+
+  getBindingsCount(): number {
+    return this.bindingsMap.size;
+  }
+
+  getProcessedFilesCount(): number {
+    return this.processedFiles.size;
   }
 }
 
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Inverigator');
   const diagnostics = vscode.languages.createDiagnosticCollection('inverigator');
-  
+
   context.subscriptions.push(outputChannel, diagnostics);
-  
+
   const navigator = new InversifyNavigator(context, diagnostics, outputChannel);
-  
+
   // Initialize the navigator
-  navigator.initialize().then(() => {
-    outputChannel.appendLine('Inverigator extension activated successfully');
-  }).catch(error => {
-    outputChannel.appendLine(`Failed to initialize: ${error}`);
-    vscode.window.showErrorMessage(`Inverigator failed to initialize: ${error}`);
-  });
+  navigator
+    .initialize()
+    .then(() => {
+      outputChannel.appendLine('Inverigator extension activated successfully');
+      outputChannel.appendLine(`Scanned ${navigator.getProcessedFilesCount()} files`);
+      outputChannel.appendLine(`Found ${navigator.getBindingsCount()} bindings`);
+    })
+    .catch(error => {
+      outputChannel.appendLine(`Failed to initialize: ${error}`);
+      vscode.window.showErrorMessage(`Inverigator failed to initialize: ${error}`);
+    });
 
   // Register commands
   context.subscriptions.push(
@@ -391,8 +555,6 @@ export function activate(context: vscode.ExtensionContext) {
       navigator.rescan();
     })
   );
-
-  // Remove the hello world command as it's no longer needed
 }
 
 export function deactivate() {}

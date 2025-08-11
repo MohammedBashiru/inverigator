@@ -47,6 +47,13 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically rescan container files when they are saved"
+        },
+        "inverigator.maxScanDepth": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum depth to follow imports when scanning for bindings in modular containers"
         }
       }
     },

@@ -78,6 +78,9 @@ The extension has been significantly improved with:
 6. **✅ Multiple Container Support**: Scans all matching container files in workspace
 7. **✅ File Watching**: Auto-rescan on container file changes
 8. **✅ New Commands**: Added "Show All Bindings" and "Rescan Container Files" commands
+9. **✅ Modular Container Support**: Recursively scans imported registry/configuration modules
+10. **✅ Deep Import Following**: Follows function calls like `ConfigureRepositoriesRegistry(container)` to find bindings in sub-modules
+11. **✅ Smart Pattern Detection**: Automatically discovers files with registry/binding patterns
 
 ## Extension Commands
 
@@ -89,6 +92,7 @@ The extension has been significantly improved with:
 
 - `inverigator.containerPaths`: Array of glob patterns for container files (default: `["**/container.ts", "**/inversify.config.ts", "**/ioc.ts"]`)
 - `inverigator.autoScanOnSave`: Auto-rescan when container files change (default: `true`)
+- `inverigator.maxScanDepth`: Maximum depth to follow imports in modular containers (default: `5`, range: 1-10)
 
 ## Context Menu Integration
 
