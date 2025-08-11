@@ -4,12 +4,14 @@ import { DEFAULT_CONFIG, EXTENSION_NAME } from '../constants';
 import { BindingScanner } from '../services/BindingScanner';
 import { ServiceIndexer } from '../services/ServiceIndexer';
 import { Navigator } from '../services/Navigator';
+import { InjectionMapper } from '../services/InjectionMapper';
 
 export class InversifyNavigator {
   private bindingsMap: BindingsMap = new Map();
   private serviceMap: ServiceMap = new Map();
   private bindingScanner: BindingScanner;
   private serviceIndexer: ServiceIndexer;
+  private injectionMapper: InjectionMapper;
   private navigator: Navigator;
   private fileWatcher?: vscode.FileSystemWatcher;
 
@@ -20,7 +22,8 @@ export class InversifyNavigator {
   ) {
     this.bindingScanner = new BindingScanner(outputChannel, diagnostics);
     this.serviceIndexer = new ServiceIndexer(outputChannel);
-    this.navigator = new Navigator(outputChannel, this.bindingsMap, this.serviceMap);
+    this.injectionMapper = new InjectionMapper(outputChannel);
+    this.navigator = new Navigator(outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper);
   }
 
   async initialize() {
@@ -39,8 +42,11 @@ export class InversifyNavigator {
     // Index services
     this.serviceMap = await this.serviceIndexer.indexServices();
 
+    // Map injections (interfaces to tokens)
+    await this.injectionMapper.mapInjections();
+
     // Update navigator with new data
-    this.navigator = new Navigator(this.outputChannel, this.bindingsMap, this.serviceMap);
+    this.navigator = new Navigator(this.outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper);
 
     this.outputChannel.appendLine(
       `${EXTENSION_NAME} initialization complete: ${this.getBindingsCount()} bindings, ${this.serviceMap.size} services`

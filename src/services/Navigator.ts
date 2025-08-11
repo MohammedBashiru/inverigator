@@ -3,13 +3,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Binding, BindingsMap, ServiceMap } from '../types';
 import { searchForClass } from '../utils/fileUtils';
+import { InjectionMapper } from './InjectionMapper';
 
 export class Navigator {
   constructor(
     private outputChannel: vscode.OutputChannel,
     private bindingsMap: BindingsMap,
-    private serviceMap: ServiceMap
+    private serviceMap: ServiceMap,
+    private injectionMapper?: InjectionMapper
   ) {}
+
+  setInjectionMapper(mapper: InjectionMapper) {
+    this.injectionMapper = mapper;
+  }
 
   async goToImplementation() {
     const editor = vscode.window.activeTextEditor;
@@ -23,13 +29,13 @@ export class Navigator {
     
     // Get the full line context to understand what we're navigating
     const line = document.lineAt(position.line);
-    const lineText = line.text;
+    const currentLineText = line.text;
     
     // Check if we're on a method call (e.g., this.service.method())
     const methodCallRegex = /(\w+)\.(\w+)\s*\(/;
-    const methodMatch = methodCallRegex.exec(lineText);
+    const methodMatch = methodCallRegex.exec(currentLineText);
     
-    if (methodMatch && position.character >= lineText.indexOf(methodMatch[0])) {
+    if (methodMatch && position.character >= currentLineText.indexOf(methodMatch[0])) {
       const serviceName = methodMatch[1];
       const methodName = methodMatch[2];
       
@@ -48,7 +54,37 @@ export class Navigator {
 
     const symbol = document.getText(wordRange);
     
-    // First, try direct binding lookup
+    // First, check if this is an interface that maps to a token
+    if (this.injectionMapper && symbol.startsWith('I')) {
+      const token = this.injectionMapper.getTokenForInterface(symbol);
+      if (token) {
+        this.outputChannel.appendLine(`Interface ${symbol} maps to token ${token}`);
+        // Look up the binding for this token
+        const tokenBindings = this.bindingsMap.get(token);
+        if (tokenBindings && tokenBindings.length > 0) {
+          await this.handleBindings(tokenBindings, symbol);
+          return;
+        }
+      }
+    }
+    
+    // Check if we're on a property that has injection info
+    const lineText = document.lineAt(position.line).text;
+    const propertyMatch = lineText.match(/this\.(\w+)/);
+    if (propertyMatch && this.injectionMapper) {
+      const propertyName = propertyMatch[1];
+      const injectionInfo = this.injectionMapper.getInjectionInfoForProperty(propertyName);
+      if (injectionInfo) {
+        this.outputChannel.appendLine(`Property ${propertyName} has injection info: ${injectionInfo.token}`);
+        const tokenBindings = this.bindingsMap.get(injectionInfo.token);
+        if (tokenBindings && tokenBindings.length > 0) {
+          await this.handleBindings(tokenBindings, propertyName);
+          return;
+        }
+      }
+    }
+    
+    // Try direct binding lookup
     let bindings = this.bindingsMap.get(symbol);
 
     // If no direct match, try to find by implementation name

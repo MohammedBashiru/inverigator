@@ -49,9 +49,11 @@ src/
 ```
 
 ### Key Components
+
 - **InversifyNavigator**: Main coordinator that orchestrates all services
 - **BindingScanner**: Recursively scans container files for bindings
 - **ServiceIndexer**: Indexes all service classes for quick lookup
+- **InjectionMapper**: Maps interfaces to injection tokens from @inject decorators
 - **Navigator**: Handles the actual navigation logic
 - **Utils**: Reusable utilities for AST parsing and file operations
 
@@ -103,6 +105,9 @@ The extension has been significantly improved with:
 9. **✅ Modular Container Support**: Recursively scans imported registry/configuration modules
 10. **✅ Deep Import Following**: Follows function calls like `ConfigureRepositoriesRegistry(container)` to find bindings in sub-modules
 11. **✅ Smart Pattern Detection**: Automatically discovers files with registry/binding patterns
+12. **✅ Interface Navigation**: Navigate from interfaces (e.g., `ITravelTourRegistrationService`) to their implementations
+13. **✅ Injection Mapping**: Maps `@inject(TOKEN)` decorators to understand interface->token->implementation relationships
+14. **✅ Property Navigation**: Navigate from injected properties (e.g., `this.travelTourService`) to their implementations
 
 ## Extension Commands
 
