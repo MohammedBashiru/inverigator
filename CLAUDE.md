@@ -51,11 +51,12 @@ src/
 ### Key Components
 
 - **InversifyNavigator**: Main coordinator that orchestrates all services
-- **BindingScanner**: Recursively scans container files for bindings
+- **BindingScanner**: Uses content-based scanning to find all bindings regardless of file location
 - **ServiceIndexer**: Indexes all service classes for quick lookup
 - **InjectionMapper**: Maps interfaces to injection tokens from @inject decorators
 - **Navigator**: Handles the actual navigation logic
-- **Utils**: Reusable utilities for AST parsing and file operations
+- **IgnorePatternMatcher**: Manages file exclusion patterns from `.inverigatorignore`
+- **Utils**: Reusable utilities for AST parsing, file operations, and TypeScript config resolution
 
 ### Extension Structure
 The extension follows the standard VS Code extension architecture:
@@ -65,17 +66,19 @@ The extension follows the standard VS Code extension architecture:
 
 ### Core Functionality
 The extension implements InversifyJS navigation through:
-1. **Container Scanning**: On activation, scans `src/container.ts` for InversifyJS bindings using TypeScript AST
-2. **Binding Map**: Builds a map of tokens to implementation classes from `container.bind(Token).to(Implementation)` patterns
-3. **Navigation Command**: `inversifyNavigator.goToImplementation` command that:
-   - Gets the symbol at cursor position
+1. **Content-Based Scanning**: Searches all TypeScript files for `.bind(` patterns to find bindings anywhere in the codebase
+2. **TypeScript Config Resolution**: Uses `tsconfig.json` to properly resolve path aliases like `@/`
+3. **Export Following**: Follows export declarations in index files to find actual implementations
+4. **Binding Map**: Builds a comprehensive map of tokens to implementation classes
+5. **Navigation Command**: `inversifyNavigator.goToImplementation` command that:
+   - Gets the symbol at cursor position (direct token, interface, or injected property)
+   - Resolves through the injection mapping if needed
    - Looks up the implementation in the bindings map
-   - Searches workspace for the implementation file
    - Opens the implementation file in the editor
 
 ### Dependencies
-- **typescript**: Required as a runtime dependency for AST parsing of container files
-- Note: TypeScript is currently in devDependencies but is used at runtime in the extension
+- **typescript**: Runtime dependency for AST parsing and TypeScript config resolution
+- **minimatch**: Pattern matching for `.inverigatorignore` file support
 
 ## Testing Approach
 - Tests are written in TypeScript in `src/test/` directory
@@ -108,18 +111,43 @@ The extension has been significantly improved with:
 12. **✅ Interface Navigation**: Navigate from interfaces (e.g., `ITravelTourRegistrationService`) to their implementations
 13. **✅ Injection Mapping**: Maps `@inject(TOKEN)` decorators to understand interface->token->implementation relationships
 14. **✅ Property Navigation**: Navigate from injected properties (e.g., `this.travelTourService`) to their implementations
+15. **✅ Content-Based Scanning**: Primary strategy that finds all bindings regardless of file location or naming
+16. **✅ TypeScript Config Support**: Properly resolves path aliases from `tsconfig.json`
+17. **✅ Export Following**: Follows export declarations in registry index files
+18. **✅ Ignore Pattern Support**: `.inverigatorignore` file for excluding directories/files from scanning
 
 ## Extension Commands
 
 - `inversifyNavigator.goToImplementation`: Navigate from injection token to implementation
 - `inverigator.showBindings`: Display all discovered InversifyJS bindings
 - `inverigator.rescan`: Manually rescan all container files
+- `inverigator.showInjections`: Show all interface-to-token mappings
+- `inverigator.generateIgnoreFile`: Generate a sample `.inverigatorignore` file
 
 ## Configuration Settings
 
-- `inverigator.containerPaths`: Array of glob patterns for container files (default: `["**/container.ts", "**/inversify.config.ts", "**/ioc.ts"]`)
+- `inverigator.containerPaths`: Array of glob patterns for container files (default includes common patterns)
 - `inverigator.autoScanOnSave`: Auto-rescan when container files change (default: `true`)
 - `inverigator.maxScanDepth`: Maximum depth to follow imports in modular containers (default: `5`, range: 1-10)
+
+## Ignore Patterns (.inverigatorignore)
+
+Create a `.inverigatorignore` file in your project root to exclude files/directories from scanning. Uses gitignore-style patterns.
+
+Default exclusions:
+- Test files (`*.test.ts`, `*.spec.ts`, `__tests__/`, `__mocks__/`)
+- Build outputs (`dist/`, `build/`, `out/`)
+- Dependencies (`node_modules/`, `vendor/`)
+- Type definitions (`*.d.ts`)
+- Temporary files (`tmp/`, `temp/`)
+
+Example `.inverigatorignore`:
+```
+# Custom exclusions
+examples/
+archived/
+**/*.backup.ts
+```
 
 ## Context Menu Integration
 

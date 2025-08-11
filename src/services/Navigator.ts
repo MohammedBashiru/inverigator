@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import { Binding, BindingsMap, ServiceMap } from '../types';
 import { searchForClass } from '../utils/fileUtils';
@@ -54,6 +53,16 @@ export class Navigator {
 
     const symbol = document.getText(wordRange);
     
+    // Log what symbol we're looking for
+    this.outputChannel.appendLine(`\n=== Navigation Request ===`);
+    this.outputChannel.appendLine(`Looking for symbol: '${symbol}'`);
+    this.outputChannel.appendLine(`Cursor position: Line ${position.line + 1}, Column ${position.character}`);
+    this.outputChannel.appendLine(`Total bindings in map: ${this.bindingsMap.size}`);
+    
+    // Log if this is property navigation vs direct token navigation
+    const isDirectToken = symbol.includes('TYPES') || symbol.match(/^[A-Z_]+$/);
+    this.outputChannel.appendLine(`Navigation type: ${isDirectToken ? 'Direct token' : 'Property/Interface'}`);
+    
     // First, check if this is an interface that maps to a token
     if (this.injectionMapper && symbol.startsWith('I')) {
       const token = this.injectionMapper.getTokenForInterface(symbol);
@@ -68,24 +77,91 @@ export class Navigator {
       }
     }
     
-    // Check if we're on a property that has injection info
+    // Check if the symbol itself might be a property name that's injected
+    // This handles both "this.propertyName" and just "propertyName" cases
     const lineText = document.lineAt(position.line).text;
-    const propertyMatch = lineText.match(/this\.(\w+)/);
-    if (propertyMatch && this.injectionMapper) {
-      const propertyName = propertyMatch[1];
-      const injectionInfo = this.injectionMapper.getInjectionInfoForProperty(propertyName);
-      if (injectionInfo) {
-        this.outputChannel.appendLine(`Property ${propertyName} has injection info: ${injectionInfo.token}`);
-        const tokenBindings = this.bindingsMap.get(injectionInfo.token);
+    const isPropertyAccess = lineText.includes(`this.${symbol}`) || lineText.includes(`.${symbol}`);
+    
+    if (isPropertyAccess || symbol.match(/^[a-z]/)) { // Properties typically start with lowercase
+      this.outputChannel.appendLine(`Checking if '${symbol}' is an injected property...`);
+      
+      // First check if we have pre-scanned injection info
+      if (this.injectionMapper) {
+        const injectionInfo = this.injectionMapper.getInjectionInfoForProperty(symbol);
+        if (injectionInfo) {
+          this.outputChannel.appendLine(`Property ${symbol} has injection info: ${injectionInfo.token}`);
+          const tokenBindings = this.bindingsMap.get(injectionInfo.token);
+          if (tokenBindings && tokenBindings.length > 0) {
+            await this.handleBindings(tokenBindings, symbol);
+            return;
+          }
+        }
+      }
+      
+      // If not found in pre-scan, try to find it in current file's constructor
+      const fileText = document.getText();
+      const injectionToken = this.findInjectionTokenForProperty(symbol, fileText);
+      if (injectionToken) {
+        this.outputChannel.appendLine(`Found injection token for ${symbol}: ${injectionToken}`);
+        
+        // Try exact match first
+        let tokenBindings = this.bindingsMap.get(injectionToken);
+        
+        // If no exact match, check if the token exists with a different case or format
+        if (!tokenBindings || tokenBindings.length === 0) {
+          this.outputChannel.appendLine(`No exact match for token '${injectionToken}', checking all keys...`);
+          
+          // Log all available keys for debugging
+          const allKeys = Array.from(this.bindingsMap.keys());
+          this.outputChannel.appendLine(`Available binding keys (${allKeys.length} total): ${allKeys.slice(0, 10).join(', ')}...`);
+          
+          // Check if TYPES.TravelTourRegistrationService exists
+          const exactKey = allKeys.find(key => key === injectionToken);
+          if (exactKey) {
+            this.outputChannel.appendLine(`Found exact key match: ${exactKey}`);
+            tokenBindings = this.bindingsMap.get(exactKey);
+          } else {
+            // Try to find a matching key
+            const matchingKey = allKeys.find(key => {
+              // Check if the key ends with the same identifier
+              const tokenParts = injectionToken.split('.');
+              const keyParts = key.split('.');
+              
+              if (tokenParts.length > 0 && keyParts.length > 0) {
+                const tokenEnd = tokenParts[tokenParts.length - 1];
+                const keyEnd = keyParts[keyParts.length - 1];
+                return tokenEnd === keyEnd;
+              }
+              
+              return key === injectionToken || key.includes(injectionToken) || injectionToken.includes(key);
+            });
+            
+            if (matchingKey) {
+              this.outputChannel.appendLine(`Found matching key: ${matchingKey}`);
+              tokenBindings = this.bindingsMap.get(matchingKey);
+            }
+          }
+        }
+        
         if (tokenBindings && tokenBindings.length > 0) {
-          await this.handleBindings(tokenBindings, propertyName);
+          this.outputChannel.appendLine(`Found ${tokenBindings.length} bindings for token`);
+          await this.handleBindings(tokenBindings, symbol);
           return;
+        } else {
+          this.outputChannel.appendLine(`No bindings found for token ${injectionToken}`);
+          // Debug: Let's see what the binding map actually contains for this token
+          this.outputChannel.appendLine(`Debug: Checking bindingsMap.has('${injectionToken}') = ${this.bindingsMap.has(injectionToken)}`);
+          if (this.bindingsMap.has('TYPES.TravelTourRegistrationService')) {
+            const bindings = this.bindingsMap.get('TYPES.TravelTourRegistrationService');
+            this.outputChannel.appendLine(`Debug: TYPES.TravelTourRegistrationService exists with ${bindings?.length} bindings`);
+          }
         }
       }
     }
     
     // Try direct binding lookup
     let bindings = this.bindingsMap.get(symbol);
+    this.outputChannel.appendLine(`Direct lookup for '${symbol}': ${bindings?.length || 0} bindings found`);
 
     // If no direct match, try to find by implementation name
     if (!bindings || bindings.length === 0) {
@@ -119,6 +195,33 @@ export class Navigator {
     } else {
       await this.handleBindings(bindings, symbol);
     }
+  }
+
+  private findInjectionTokenForProperty(propertyName: string, fileText: string): string | null {
+    // Look for constructor injection pattern
+    // Example: @inject(TYPES.TravelTourRegistrationService) private travelTourService: ITravelTourRegistrationService
+    const constructorRegex = new RegExp(
+      `@inject\\s*\\(([^)]+)\\)\\s+(?:private|public|protected)?\\s+${propertyName}\\s*:`,
+      'g'
+    );
+    
+    const match = constructorRegex.exec(fileText);
+    if (match) {
+      return match[1].trim();
+    }
+    
+    // Also check for property injection pattern
+    const propertyRegex = new RegExp(
+      `@inject\\s*\\(([^)]+)\\)[^;]*${propertyName}\\s*:`,
+      'g'
+    );
+    
+    const propMatch = propertyRegex.exec(fileText);
+    if (propMatch) {
+      return propMatch[1].trim();
+    }
+    
+    return null;
   }
 
   private async navigateToMethod(

@@ -36,6 +36,10 @@ export class InversifyNavigator {
     const patterns = config.get<string[]>('containerPaths') || DEFAULT_CONFIG.containerPaths;
     const maxDepth = config.get<number>('maxScanDepth', DEFAULT_CONFIG.maxScanDepth);
 
+    this.outputChannel.appendLine(`\n=== Starting Full Scan ===`);
+    this.outputChannel.appendLine(`Container patterns: ${patterns.join(', ')}`);
+    this.outputChannel.appendLine(`Max scan depth: ${maxDepth}`);
+
     // Scan for bindings
     this.bindingsMap = await this.bindingScanner.scan(patterns, maxDepth);
 
@@ -90,6 +94,30 @@ export class InversifyNavigator {
 
   async showBindings() {
     await this.navigator.showBindings();
+  }
+
+  async showInjections() {
+    const items: vscode.QuickPickItem[] = [];
+    const mappings = this.injectionMapper.getAllMappings();
+    
+    mappings.forEach((token, interfaceName) => {
+      items.push({
+        label: `${interfaceName} → ${token}`,
+        description: 'Interface to Token mapping',
+        detail: `Interface ${interfaceName} is injected with ${token}`
+      });
+    });
+
+    if (items.length === 0) {
+      vscode.window.showInformationMessage('No injection mappings found.');
+      return;
+    }
+
+    await vscode.window.showQuickPick(items, {
+      placeHolder: `All injection mappings (${items.length} total)`,
+      matchOnDescription: true,
+      matchOnDetail: true
+    });
   }
 
   async rescan() {
