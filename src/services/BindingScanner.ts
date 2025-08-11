@@ -24,7 +24,7 @@ export class BindingScanner {
     }
   }
 
-  async scan(patterns: string[], maxDepth: number): Promise<BindingsMap> {
+  async scan(patterns: string[], maxDepth: number, progress?: vscode.Progress<{ message?: string; increment?: number }>): Promise<BindingsMap> {
     this.bindingsMap.clear();
     this.processedFiles.clear();
     this.importedFunctions.clear();
@@ -33,7 +33,7 @@ export class BindingScanner {
     
     // Use content-based search as the primary strategy
     // This is more reliable than pattern-based for finding all bindings
-    await this.contentBasedScan(maxDepth);
+    await this.contentBasedScan(maxDepth, progress);
     
     // Also scan any explicitly configured patterns (like container.ts)
     // These might have configuration without direct bindings
@@ -500,8 +500,12 @@ export class BindingScanner {
     return null;
   }
 
-  private async contentBasedScan(maxDepth: number) {
+  private async contentBasedScan(maxDepth: number, progress?: vscode.Progress<{ message?: string; increment?: number }>) {
     this.outputChannel.appendLine('Searching for files containing Inversify bindings...');
+    
+    if (progress) {
+      progress.report({ message: 'Searching for TypeScript files...' });
+    }
     
     // Search for TypeScript files that likely contain bindings
     const allTsFiles = await findFiles('**/*.{ts,tsx}');
@@ -511,12 +515,17 @@ export class BindingScanner {
     
     this.outputChannel.appendLine(`Found ${candidateFiles.length} TypeScript files to analyze (excluded ${allTsFiles.length - candidateFiles.length} files)`);
     
+    if (progress) {
+      progress.report({ message: `Analyzing ${candidateFiles.length} TypeScript files...` });
+    }
+    
     // First pass: Quick scan to find files with binding patterns
     const bindingFiles: vscode.Uri[] = [];
     const containerFiles: vscode.Uri[] = [];
     
     // Process in batches for better performance
     const batchSize = 50;
+    const totalFiles = candidateFiles.length;
     for (let i = 0; i < candidateFiles.length; i += batchSize) {
       const batch = candidateFiles.slice(i, i + batchSize);
       
@@ -550,8 +559,13 @@ export class BindingScanner {
       }));
       
       // Update progress
+      const processed = Math.min(i + batchSize, candidateFiles.length);
       if ((i + batchSize) % 200 === 0 || i + batchSize >= candidateFiles.length) {
-        this.outputChannel.appendLine(`  Analyzed ${Math.min(i + batchSize, candidateFiles.length)}/${candidateFiles.length} files...`);
+        this.outputChannel.appendLine(`  Analyzed ${processed}/${candidateFiles.length} files...`);
+      }
+      if (progress) {
+        const percentage = Math.round((processed / totalFiles) * 100);
+        progress.report({ message: `Analyzing files... (${percentage}%)` });
       }
     }
     
@@ -560,17 +574,32 @@ export class BindingScanner {
     // Scan binding files first (they have actual bindings)
     if (bindingFiles.length > 0) {
       this.outputChannel.appendLine('\nScanning files with bindings:');
-      for (const file of bindingFiles) {
-        await this.scanContainerFile(file.fsPath, 0, Math.min(maxDepth, 3));
+      if (progress) {
+        progress.report({ message: `Processing ${bindingFiles.length} files with bindings...` });
+      }
+      for (let i = 0; i < bindingFiles.length; i++) {
+        await this.scanContainerFile(bindingFiles[i].fsPath, 0, Math.min(maxDepth, 3));
+        if (progress && i % 5 === 0) {
+          const percentage = Math.round(((i + 1) / bindingFiles.length) * 100);
+          progress.report({ message: `Processing binding files... (${percentage}%)` });
+        }
       }
     }
     
     // Then scan container files (might have configuration)
     if (containerFiles.length > 0) {
       this.outputChannel.appendLine('\nScanning files with container references:');
-      for (const file of containerFiles.slice(0, 20)) { // Limit container files to avoid over-scanning
-        if (!this.processedFiles.has(file.fsPath)) {
-          await this.scanContainerFile(file.fsPath, 0, Math.min(maxDepth, 2));
+      const filesToScan = containerFiles.slice(0, 20); // Limit container files to avoid over-scanning
+      if (progress) {
+        progress.report({ message: `Processing ${filesToScan.length} container files...` });
+      }
+      for (let i = 0; i < filesToScan.length; i++) {
+        if (!this.processedFiles.has(filesToScan[i].fsPath)) {
+          await this.scanContainerFile(filesToScan[i].fsPath, 0, Math.min(maxDepth, 2));
+          if (progress && i % 3 === 0) {
+            const percentage = Math.round(((i + 1) / filesToScan.length) * 100);
+            progress.report({ message: `Processing container files... (${percentage}%)` });
+          }
         }
       }
     }

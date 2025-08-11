@@ -10,7 +10,7 @@ export class ServiceIndexer {
 
   constructor(private outputChannel: vscode.OutputChannel) {}
 
-  async indexServices(): Promise<ServiceMap> {
+  async indexServices(progress?: vscode.Progress<{ message?: string; increment?: number }>): Promise<ServiceMap> {
     this.serviceMap.clear();
     
     // Scan all TypeScript files for service classes

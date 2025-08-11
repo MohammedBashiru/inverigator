@@ -20,7 +20,7 @@ export class InjectionMapper {
 
   constructor(private outputChannel: vscode.OutputChannel) {}
 
-  async mapInjections(): Promise<void> {
+  async mapInjections(progress?: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
     this.interfaceToTokenMap.clear();
     this.propertyToInterfaceMap.clear();
     this.tokenToInterfaceMap.clear();

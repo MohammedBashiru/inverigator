@@ -14,6 +14,7 @@ export class InversifyNavigator {
   private injectionMapper: InjectionMapper;
   private navigator: Navigator;
   private fileWatcher?: vscode.FileSystemWatcher;
+  private statusBarItem?: vscode.StatusBarItem;
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -26,12 +27,24 @@ export class InversifyNavigator {
     this.navigator = new Navigator(outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper);
   }
 
-  async initialize() {
-    await this.scanAll();
-    this.setupFileWatchers();
+  setStatusBarItem(statusBarItem: vscode.StatusBarItem) {
+    this.statusBarItem = statusBarItem;
   }
 
-  private async scanAll() {
+  async initialize() {
+    await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: "Inverigator",
+      cancellable: false
+    }, async (progress) => {
+      progress.report({ message: "Initializing InversifyJS navigation..." });
+      await this.scanAll(progress);
+      this.setupFileWatchers();
+      return;
+    });
+  }
+
+  private async scanAll(progress?: vscode.Progress<{ message?: string; increment?: number }>) {
     const config = vscode.workspace.getConfiguration('inverigator');
     const patterns = config.get<string[]>('containerPaths') || DEFAULT_CONFIG.containerPaths;
     const maxDepth = config.get<number>('maxScanDepth', DEFAULT_CONFIG.maxScanDepth);
@@ -41,13 +54,22 @@ export class InversifyNavigator {
     this.outputChannel.appendLine(`Max scan depth: ${maxDepth}`);
 
     // Scan for bindings
-    this.bindingsMap = await this.bindingScanner.scan(patterns, maxDepth);
+    if (progress) {
+      progress.report({ message: "Scanning for InversifyJS bindings..." });
+    }
+    this.bindingsMap = await this.bindingScanner.scan(patterns, maxDepth, progress);
 
     // Index services
-    this.serviceMap = await this.serviceIndexer.indexServices();
+    if (progress) {
+      progress.report({ message: "Indexing service classes..." });
+    }
+    this.serviceMap = await this.serviceIndexer.indexServices(progress);
 
     // Map injections (interfaces to tokens)
-    await this.injectionMapper.mapInjections();
+    if (progress) {
+      progress.report({ message: "Mapping dependency injections..." });
+    }
+    await this.injectionMapper.mapInjections(progress);
 
     // Update navigator with new data
     this.navigator = new Navigator(this.outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper);
@@ -55,6 +77,14 @@ export class InversifyNavigator {
     this.outputChannel.appendLine(
       `${EXTENSION_NAME} initialization complete: ${this.getBindingsCount()} bindings, ${this.serviceMap.size} services`
     );
+
+    // Update status bar if available
+    if (this.statusBarItem) {
+      const bindingCount = this.getBindingsCount();
+      this.statusBarItem.text = `$(check) Inverigator: ${bindingCount} bindings`;
+      this.statusBarItem.tooltip = `InversifyJS: ${bindingCount} bindings found\nClick to show all bindings`;
+      this.statusBarItem.command = 'inverigator.showBindings';
+    }
   }
 
   private setupFileWatchers() {
@@ -121,11 +151,24 @@ export class InversifyNavigator {
   }
 
   async rescan() {
-    vscode.window.showInformationMessage('Rescanning container files...');
-    await this.scanAll();
-    vscode.window.showInformationMessage(
-      `Found ${this.getBindingsCount()} bindings and ${this.serviceMap.size} services`
-    );
+    // Update status bar to show scanning
+    if (this.statusBarItem) {
+      this.statusBarItem.text = '$(sync~spin) Inverigator: Rescanning...';
+      this.statusBarItem.tooltip = 'Rescanning for InversifyJS bindings';
+    }
+
+    await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: "Inverigator",
+      cancellable: false
+    }, async (progress) => {
+      progress.report({ message: "Rescanning container files..." });
+      await this.scanAll(progress);
+      vscode.window.showInformationMessage(
+        `Found ${this.getBindingsCount()} bindings and ${this.serviceMap.size} services`
+      );
+      return;
+    });
   }
 
   getBindingsCount(): number {
