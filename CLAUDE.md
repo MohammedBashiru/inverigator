@@ -89,3 +89,27 @@ The extension has been significantly improved with:
 
 - `inverigator.containerPaths`: Array of glob patterns for container files (default: `["**/container.ts", "**/inversify.config.ts", "**/ioc.ts"]`)
 - `inverigator.autoScanOnSave`: Auto-rescan when container files change (default: `true`)
+
+## Context Menu Integration
+
+The extension adds commands to various VS Code menus:
+
+### Right-Click Context Menu (Editor)
+- **Go to Inversify Implementation**: Available when right-clicking in TypeScript/JavaScript files
+- **Show All Bindings**: Available in the context menu under "Inverigator" group
+
+### Editor Title Bar
+- Icons for "Show All Bindings" and "Rescan Container Files" in the editor title bar for TypeScript files
+
+### Explorer Context Menu
+- **Rescan Container Files**: Available when right-clicking TypeScript files in the explorer
+
+### Keyboard Shortcuts
+- **F12**: Go to Inversify Implementation (same as VS Code's "Go to Definition")
+- **Ctrl+F12** (Windows/Linux) / **Cmd+F12** (Mac): Alternative shortcut for Go to Implementation
+
+### Command Palette
+All commands are available through the Command Palette (Ctrl+Shift+P / Cmd+Shift+P):
+- `Inverigator: Go to Inversify Implementation`
+- `Inverigator: Show All Bindings`
+- `Inverigator: Rescan Container Files`
