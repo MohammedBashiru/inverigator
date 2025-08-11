@@ -10,8 +10,15 @@ interface Binding {
   line: number;
 }
 
+interface ServiceInfo {
+  className: string;
+  methods: string[];
+  file: string;
+}
+
 class InversifyNavigator {
   private bindingsMap: Map<string, Binding[]> = new Map();
+  private serviceMap: Map<string, ServiceInfo> = new Map();
   private diagnostics: vscode.DiagnosticCollection;
   private outputChannel: vscode.OutputChannel;
   private processedFiles: Set<string> = new Set();
@@ -33,9 +40,10 @@ class InversifyNavigator {
 
   private async scanAllContainers() {
     this.bindingsMap.clear();
+    this.serviceMap.clear();
     this.processedFiles.clear();
     this.importedFunctions.clear();
-
+    
     const config = vscode.workspace.getConfiguration('inverigator');
     const patterns = config.get<string[]>('containerPaths') || ['**/container.ts'];
     const scanDepth = config.get<number>('maxScanDepth', 5);
@@ -47,9 +55,71 @@ class InversifyNavigator {
       }
     }
 
+    // Also scan for service implementations to build service map
+    await this.scanServiceImplementations();
+
     this.outputChannel.appendLine(
       `Found ${this.bindingsMap.size} bindings across ${this.processedFiles.size} files`
     );
+    this.outputChannel.appendLine(
+      `Indexed ${this.serviceMap.size} service implementations`
+    );
+  }
+
+  private async scanServiceImplementations() {
+    // Scan all TypeScript files for @injectable classes
+    const tsFiles = await vscode.workspace.findFiles('**/*.{ts,tsx}', '**/node_modules/**');
+    
+    for (const file of tsFiles) {
+      try {
+        const content = fs.readFileSync(file.fsPath, 'utf-8');
+        const sourceFile = ts.createSourceFile(
+          file.fsPath,
+          content,
+          ts.ScriptTarget.Latest,
+          true
+        );
+
+        this.extractServiceInfo(sourceFile, file.fsPath);
+      } catch (error) {
+        // Silently skip files that can't be parsed
+      }
+    }
+  }
+
+  private extractServiceInfo(sourceFile: ts.SourceFile, filePath: string) {
+    const visit = (node: ts.Node) => {
+      if (ts.isClassDeclaration(node) && node.name) {
+        const className = node.name.getText(sourceFile);
+        const methods: string[] = [];
+        
+        // Check if class text contains @injectable decorator (simpler approach)
+        const nodeText = node.getText(sourceFile);
+        const hasInjectableDecorator = nodeText.includes('@injectable') || nodeText.includes('@Injectable');
+
+        // Extract methods
+        node.members.forEach(member => {
+          if (ts.isMethodDeclaration(member) && member.name) {
+            const methodName = member.name.getText(sourceFile);
+            if (!methodName.startsWith('_') && methodName !== 'constructor') {
+              methods.push(methodName);
+            }
+          }
+        });
+
+        // Store service info - include all classes that look like services
+        if (hasInjectableDecorator || className.endsWith('Service') || className.endsWith('Repository') || methods.length > 0) {
+          this.serviceMap.set(className, {
+            className,
+            methods,
+            file: filePath
+          });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
   }
 
   private async scanContainerFile(filePath: string, depth: number, maxDepth: number) {
@@ -65,14 +135,19 @@ class InversifyNavigator {
       }
 
       const source = fs.readFileSync(filePath, 'utf-8');
-      const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+      const sourceFile = ts.createSourceFile(
+        filePath,
+        source,
+        ts.ScriptTarget.Latest,
+        true
+      );
 
       // Parse bindings in this file
       this.parseBindings(sourceFile, filePath);
 
       // Find and follow imported registry/configuration functions
       const importedModules = this.findImportedModules(sourceFile, filePath);
-
+      
       // Find function calls that might configure sub-containers
       const functionCalls = this.findConfigurationFunctionCalls(sourceFile);
 
@@ -89,6 +164,7 @@ class InversifyNavigator {
       for (const registryFile of registryFiles) {
         await this.scanContainerFile(registryFile, depth + 1, maxDepth);
       }
+
     } catch (error) {
       this.outputChannel.appendLine(`Error scanning ${filePath}: ${error}`);
       const diagnostic = new vscode.Diagnostic(
@@ -119,7 +195,7 @@ class InversifyNavigator {
       );
       files.push(...foundFiles.map(f => f.fsPath));
     }
-
+    
     return [...new Set(files)];
   }
 
@@ -132,7 +208,7 @@ class InversifyNavigator {
         const moduleSpecifier = node.moduleSpecifier;
         if (ts.isStringLiteral(moduleSpecifier)) {
           const importPath = moduleSpecifier.text;
-
+          
           // Track imported functions for configuration detection
           if (node.importClause && node.importClause.namedBindings) {
             if (ts.isNamedImports(node.importClause.namedBindings)) {
@@ -151,10 +227,9 @@ class InversifyNavigator {
             // Try different extensions
             const extensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.js'];
             for (const ext of extensions) {
-              const fullPath =
-                resolvedPath.endsWith('.ts') || resolvedPath.endsWith('.js')
-                  ? resolvedPath
-                  : resolvedPath + ext;
+              const fullPath = resolvedPath.endsWith('.ts') || resolvedPath.endsWith('.js') 
+                ? resolvedPath 
+                : resolvedPath + ext;
               if (fs.existsSync(fullPath)) {
                 imports.push(fullPath);
                 break;
@@ -175,13 +250,11 @@ class InversifyNavigator {
       if (ts.isCallExpression(node)) {
         const text = node.expression.getText(sourceFile);
         // Look for configuration function patterns
-        if (
-          text.includes('Configure') ||
-          text.includes('Registry') ||
-          text.includes('register') ||
-          text.includes('Bind') ||
-          this.importedFunctions.has(text)
-        ) {
+        if (text.includes('Configure') || 
+            text.includes('Registry') || 
+            text.includes('register') ||
+            text.includes('Bind') ||
+            this.importedFunctions.has(text)) {
           functionCalls.add(text);
         }
       }
@@ -200,6 +273,13 @@ class InversifyNavigator {
           const existing = this.bindingsMap.get(binding.token) || [];
           existing.push(binding);
           this.bindingsMap.set(binding.token, existing);
+          
+          // Also map by implementation name for easier lookup
+          const implBindings = this.bindingsMap.get(binding.implementation) || [];
+          if (!implBindings.some(b => b.token === binding.token)) {
+            implBindings.push(binding);
+            this.bindingsMap.set(binding.implementation, implBindings);
+          }
         }
       }
       ts.forEachChild(node, visit);
@@ -208,13 +288,9 @@ class InversifyNavigator {
     visit(sourceFile);
   }
 
-  private extractBinding(
-    node: ts.CallExpression,
-    sourceFile: ts.SourceFile,
-    filePath: string
-  ): Binding | null {
+  private extractBinding(node: ts.CallExpression, sourceFile: ts.SourceFile, filePath: string): Binding | null {
     const text = node.expression.getText(sourceFile);
-
+    
     // Check for container.bind or just bind pattern
     if (!text.includes('.bind') && !text.endsWith('bind')) {
       return null;
@@ -235,21 +311,17 @@ class InversifyNavigator {
     while (currentNode.parent) {
       if (ts.isPropertyAccessExpression(currentNode.parent)) {
         const propAccess = currentNode.parent;
-        if (
-          propAccess.name.getText(sourceFile) === 'to' &&
-          propAccess.parent &&
-          ts.isCallExpression(propAccess.parent)
-        ) {
+        if (propAccess.name.getText(sourceFile) === 'to' && 
+            propAccess.parent && 
+            ts.isCallExpression(propAccess.parent)) {
           const toCall = propAccess.parent;
           if (toCall.arguments.length > 0) {
             implementation = this.extractIdentifier(toCall.arguments[0], sourceFile);
             break;
           }
         }
-      } else if (
-        ts.isCallExpression(currentNode.parent) &&
-        currentNode.parent.expression === currentNode
-      ) {
+      } else if (ts.isCallExpression(currentNode.parent) && 
+                 currentNode.parent.expression === currentNode) {
         // Continue up the chain
       } else {
         break;
@@ -267,9 +339,7 @@ class InversifyNavigator {
 
     if (token && implementation) {
       const pos = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-      this.outputChannel.appendLine(
-        `Found binding: ${token} → ${implementation} in ${path.basename(filePath)}`
-      );
+      this.outputChannel.appendLine(`Found binding: ${token} → ${implementation} in ${path.basename(filePath)}`);
       return {
         token,
         implementation,
@@ -283,18 +353,18 @@ class InversifyNavigator {
 
   private extractIdentifier(node: ts.Node, sourceFile: ts.SourceFile): string {
     const text = node.getText(sourceFile);
-
+    
     // Remove quotes if it's a string literal
     if (text.startsWith('"') || text.startsWith("'") || text.startsWith('`')) {
       return text.slice(1, -1);
     }
-
+    
     // Handle Symbol() calls
     if (text.startsWith('Symbol(') || text.startsWith('Symbol.for(')) {
       const match = text.match(/Symbol(?:\.for)?\(['"`](.+?)['"`]\)/);
       return match ? match[1] : text;
     }
-
+    
     return text;
   }
 
@@ -307,16 +377,14 @@ class InversifyNavigator {
     }
 
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.{ts,js}');
-
-    watcher.onDidChange(async uri => {
+    
+    watcher.onDidChange(async (uri) => {
       // Check if this file is in our processed files or matches patterns
-      if (
-        this.processedFiles.has(uri.fsPath) ||
-        uri.fsPath.includes('registry') ||
-        uri.fsPath.includes('Registry') ||
-        uri.fsPath.includes('container') ||
-        uri.fsPath.includes('Container')
-      ) {
+      if (this.processedFiles.has(uri.fsPath) || 
+          uri.fsPath.includes('registry') || 
+          uri.fsPath.includes('Registry') ||
+          uri.fsPath.includes('container') ||
+          uri.fsPath.includes('Container')) {
         this.outputChannel.appendLine(`Related file changed: ${uri.fsPath}`);
         // Rescan all containers as bindings might have changed
         await this.scanAllContainers();
@@ -334,27 +402,63 @@ class InversifyNavigator {
     }
 
     const position = editor.selection.active;
-    const wordRange = editor.document.getWordRangeAtPosition(position);
+    const document = editor.document;
+    
+    // Get the full line context to understand what we're navigating
+    const line = document.lineAt(position.line);
+    const lineText = line.text;
+    
+    // Check if we're on a method call (e.g., this.service.method())
+    const methodCallRegex = /(\w+)\.(\w+)\s*\(/;
+    const methodMatch = methodCallRegex.exec(lineText);
+    
+    if (methodMatch && position.character >= lineText.indexOf(methodMatch[0])) {
+      const serviceName = methodMatch[1];
+      const methodName = methodMatch[2];
+      
+      // Try to navigate to the method
+      if (await this.navigateToMethod(serviceName, methodName, document)) {
+        return;
+      }
+    }
+    
+    // Regular word-based navigation
+    const wordRange = document.getWordRangeAtPosition(position);
     if (!wordRange) {
       vscode.window.showErrorMessage('No symbol selected');
       return;
     }
 
-    const symbol = editor.document.getText(wordRange);
-    const bindings = this.bindingsMap.get(symbol);
+    const symbol = document.getText(wordRange);
+    
+    // First, try direct binding lookup
+    let bindings = this.bindingsMap.get(symbol);
 
+    // If no direct match, try to find by implementation name
     if (!bindings || bindings.length === 0) {
-      // Try to find partial matches
-      const partialMatches = Array.from(this.bindingsMap.keys())
-        .filter(key => key.includes(symbol) || symbol.includes(key))
-        .flatMap(key => this.bindingsMap.get(key) || []);
+      // Check if this is a service class name
+      const serviceInfo = this.serviceMap.get(symbol);
+      if (serviceInfo) {
+        // Navigate directly to the service implementation
+        await this.openFileAndNavigate(vscode.Uri.file(serviceInfo.file), symbol);
+        return;
+      }
+
+      // Try to find partial matches or by class name
+      const partialMatches = Array.from(this.bindingsMap.entries())
+        .filter(([key, _]) => {
+          return key === symbol || 
+                 key.includes(symbol) || 
+                 symbol.includes(key) ||
+                 key.endsWith('Service') && symbol.endsWith('Service') ||
+                 key.replace(/Service$/, '') === symbol.replace(/Service$/, '');
+        })
+        .flatMap(([_, bindings]) => bindings);
 
       if (partialMatches.length === 0) {
         vscode.window.showErrorMessage(`No Inversify implementation found for: ${symbol}`);
         this.outputChannel.appendLine(`No binding found for: ${symbol}`);
-        this.outputChannel.appendLine(
-          `Available bindings: ${Array.from(this.bindingsMap.keys()).join(', ')}`
-        );
+        this.outputChannel.appendLine(`Available bindings: ${Array.from(this.bindingsMap.keys()).join(', ')}`);
         return;
       }
 
@@ -364,6 +468,37 @@ class InversifyNavigator {
     }
   }
 
+  private async navigateToMethod(serviceName: string, methodName: string, document: vscode.TextDocument): Promise<boolean> {
+    // Find the service type from the current file's context
+    const text = document.getText();
+    const serviceTypeRegex = new RegExp(`private\\s+${serviceName}\\s*:\\s*(\\w+)`);
+    const match = serviceTypeRegex.exec(text);
+    
+    if (match) {
+      const serviceType = match[1];
+      const serviceInfo = this.serviceMap.get(serviceType);
+      
+      if (serviceInfo) {
+        const doc = await vscode.workspace.openTextDocument(serviceInfo.file);
+        const editor = await vscode.window.showTextDocument(doc);
+        
+        // Find the method in the file
+        const fileText = doc.getText();
+        const methodRegex = new RegExp(`\\b${methodName}\\s*\\(`);
+        const methodMatch = methodRegex.exec(fileText);
+        
+        if (methodMatch) {
+          const position = doc.positionAt(methodMatch.index!);
+          editor.selection = new vscode.Selection(position, position);
+          editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
   private async handleBindings(bindings: Binding[], symbol: string) {
     if (bindings.length === 1) {
       await this.navigateToImplementation(bindings[0]);
@@ -371,8 +506,8 @@ class InversifyNavigator {
       // Multiple bindings, let user choose
       const items = bindings.map(b => ({
         label: b.implementation,
-        description: path.basename(b.file),
-        detail: `Line ${b.line + 1} in ${b.file}`,
+        description: `${b.token} → ${b.implementation}`,
+        detail: `Line ${b.line + 1} in ${path.basename(b.file)}`,
         binding: b
       }));
 
@@ -389,7 +524,14 @@ class InversifyNavigator {
   private async navigateToImplementation(binding: Binding) {
     // First, try to find the implementation file
     const implName = binding.implementation;
-
+    
+    // Check if we already have this in our service map
+    const serviceInfo = this.serviceMap.get(implName);
+    if (serviceInfo) {
+      await this.openFileAndNavigate(vscode.Uri.file(serviceInfo.file), implName);
+      return;
+    }
+    
     // Search patterns for the implementation
     const searchPatterns = [
       `**/${implName}.ts`,
@@ -413,7 +555,7 @@ class InversifyNavigator {
     if (foundFiles.length === 0) {
       // Try to search for the class/interface definition in all TypeScript files
       const allTsFiles = await vscode.workspace.findFiles('**/*.{ts,tsx}', '**/node_modules/**');
-
+      
       for (const file of allTsFiles) {
         const content = fs.readFileSync(file.fsPath, 'utf-8');
         const classRegex = new RegExp(`(?:export\\s+)?(?:class|interface)\\s+${implName}\\b`);
@@ -461,10 +603,7 @@ class InversifyNavigator {
     if (match) {
       const position = document.positionAt(match.index!);
       editor.selection = new vscode.Selection(position, position);
-      editor.revealRange(
-        new vscode.Range(position, position),
-        vscode.TextEditorRevealType.InCenter
-      );
+      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
     }
   }
 
@@ -478,14 +617,19 @@ class InversifyNavigator {
 
   async showBindings() {
     const items: vscode.QuickPickItem[] = [];
-
-    this.bindingsMap.forEach((bindings, token) => {
+    const addedBindings = new Set<string>();
+    
+    this.bindingsMap.forEach((bindings) => {
       bindings.forEach(binding => {
-        items.push({
-          label: `${token} → ${binding.implementation}`,
-          description: path.basename(binding.file),
-          detail: `Line ${binding.line + 1}`
-        });
+        const key = `${binding.token} → ${binding.implementation}`;
+        if (!addedBindings.has(key)) {
+          addedBindings.add(key);
+          items.push({
+            label: key,
+            description: path.basename(binding.file),
+            detail: `Line ${binding.line + 1}`
+          });
+        }
       });
     });
 
@@ -502,13 +646,20 @@ class InversifyNavigator {
   }
 
   async rescan() {
-    vscode.window.showInformationMessage('Re-scanning container files...');
+    vscode.window.showInformationMessage('Rescanning container files...');
     await this.scanAllContainers();
-    vscode.window.showInformationMessage(`Found ${this.bindingsMap.size} bindings`);
+    vscode.window.showInformationMessage(`Found ${this.bindingsMap.size} unique tokens with bindings`);
   }
 
   getBindingsCount(): number {
-    return this.bindingsMap.size;
+    // Count unique token->implementation pairs
+    const uniqueBindings = new Set<string>();
+    this.bindingsMap.forEach(bindings => {
+      bindings.forEach(b => {
+        uniqueBindings.add(`${b.token}→${b.implementation}`);
+      });
+    });
+    return uniqueBindings.size;
   }
 
   getProcessedFilesCount(): number {
@@ -519,23 +670,20 @@ class InversifyNavigator {
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Inverigator');
   const diagnostics = vscode.languages.createDiagnosticCollection('inverigator');
-
+  
   context.subscriptions.push(outputChannel, diagnostics);
-
+  
   const navigator = new InversifyNavigator(context, diagnostics, outputChannel);
-
+  
   // Initialize the navigator
-  navigator
-    .initialize()
-    .then(() => {
-      outputChannel.appendLine('Inverigator extension activated successfully');
-      outputChannel.appendLine(`Scanned ${navigator.getProcessedFilesCount()} files`);
-      outputChannel.appendLine(`Found ${navigator.getBindingsCount()} bindings`);
-    })
-    .catch(error => {
-      outputChannel.appendLine(`Failed to initialize: ${error}`);
-      vscode.window.showErrorMessage(`Inverigator failed to initialize: ${error}`);
-    });
+  navigator.initialize().then(() => {
+    outputChannel.appendLine('Inverigator extension activated successfully');
+    outputChannel.appendLine(`Scanned ${navigator.getProcessedFilesCount()} files`);
+    outputChannel.appendLine(`Found ${navigator.getBindingsCount()} bindings`);
+  }).catch(error => {
+    outputChannel.appendLine(`Failed to initialize: ${error}`);
+    vscode.window.showErrorMessage(`Inverigator failed to initialize: ${error}`);
+  });
 
   // Register commands
   context.subscriptions.push(
