@@ -66,20 +66,26 @@ The extension implements InversifyJS navigation through:
 - Source maps enabled for debugging
 - Root directory: `src/`
 
-## Known Limitations & Improvements Needed
+## Recent Improvements
 
-1. **TypeScript Dependency**: TypeScript is listed as a devDependency but is imported and used at runtime. This needs to be moved to dependencies or bundled.
+The extension has been significantly improved with:
 
-2. **Container Path**: Currently hardcoded to `src/container.ts`. Should be configurable via settings or auto-discovered.
+1. **✅ TypeScript Dependency**: Moved to dependencies for proper runtime usage
+2. **✅ Configurable Container Paths**: Added settings for multiple container file patterns
+3. **✅ Enhanced AST Parsing**: Improved to handle various binding patterns including Symbol() tokens
+4. **✅ Smart File Discovery**: Multiple search strategies including kebab-case, snake_case, and content-based search
+5. **✅ Comprehensive Error Handling**: Added output channel, diagnostics, and graceful error recovery
+6. **✅ Multiple Container Support**: Scans all matching container files in workspace
+7. **✅ File Watching**: Auto-rescan on container file changes
+8. **✅ New Commands**: Added "Show All Bindings" and "Rescan Container Files" commands
 
-3. **AST Parsing**: The current implementation has limitations:
-   - Only detects direct `container.bind().to()` patterns
-   - Won't detect bindings split across multiple lines or stored in variables
-   - Doesn't handle dynamic bindings or factory bindings
+## Extension Commands
 
-4. **File Discovery**: Implementation file search assumes the class name matches the filename, which may not always be true.
+- `inversifyNavigator.goToImplementation`: Navigate from injection token to implementation
+- `inverigator.showBindings`: Display all discovered InversifyJS bindings
+- `inverigator.rescan`: Manually rescan all container files
 
-5. **Error Handling**: Needs better error handling for:
-   - Missing container file
-   - TypeScript parsing errors
-   - Multiple potential implementation files
+## Configuration Settings
+
+- `inverigator.containerPaths`: Array of glob patterns for container files (default: `["**/container.ts", "**/inversify.config.ts", "**/ioc.ts"]`)
+- `inverigator.autoScanOnSave`: Auto-rescan when container files change (default: `true`)
