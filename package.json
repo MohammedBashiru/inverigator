@@ -1,4 +1,5 @@
 {
+  "icon": "icon.png",
   "name": "inverigator",
   "displayName": "inverigator",
   "description": "Jump to InversifyJS implementation from an injected type",
@@ -46,6 +47,11 @@
       {
         "command": "inverigator.goToImplementationWithToken",
         "title": "Go to Implementation (With Token)",
+        "category": "Inverigator"
+      },
+      {
+        "command": "inverigator.goToMethod",
+        "title": "Go to Method Implementation",
         "category": "Inverigator"
       }
     ],

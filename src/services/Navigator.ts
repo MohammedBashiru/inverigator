@@ -68,9 +68,21 @@ export class Navigator {
       const serviceName = methodMatch[1];
       const methodName = methodMatch[2];
       
-      // Try to navigate to the method
-      if (await this.navigateToMethod(serviceName, methodName, document)) {
-        return;
+      // Check if cursor is on the method name part
+      const methodStart = currentLineText.indexOf(methodMatch[0]) + serviceName.length + 1; // +1 for the dot
+      const methodEnd = methodStart + methodName.length;
+      
+      if (position.character >= methodStart && position.character <= methodEnd) {
+        // Cursor is on method name, navigate to method
+        this.outputChannel.appendLine(`Cursor on method: ${methodName}, attempting method navigation`);
+        if (await this.navigateToMethod(serviceName, methodName, document)) {
+          return;
+        }
+      } else if (position.character >= currentLineText.indexOf(serviceName) && 
+                 position.character <= currentLineText.indexOf(serviceName) + serviceName.length) {
+        // Cursor is on service name, navigate to service implementation
+        this.outputChannel.appendLine(`Cursor on service: ${serviceName}, navigating to service implementation`);
+        // Continue with regular navigation logic below
       }
     }
     
@@ -411,6 +423,102 @@ export class Navigator {
     }
     
     return undefined;
+  }
+
+  async goToMethod(serviceName: string, methodName: string) {
+    this.outputChannel.appendLine(`\n=== Method Navigation Request ===`);
+    this.outputChannel.appendLine(`Looking for ${serviceName}.${methodName}()`);
+    
+    // First, find the service implementation
+    const injectionInfo = this.injectionMapper?.getInjectionInfoForProperty(serviceName);
+    if (!injectionInfo) {
+      vscode.window.showErrorMessage(`Could not find injection info for ${serviceName}`);
+      return;
+    }
+    
+    const token = injectionInfo.token;
+    const bindings = this.bindingsMap.get(token);
+    if (!bindings || bindings.length === 0) {
+      vscode.window.showErrorMessage(`No implementation found for ${serviceName}`);
+      return;
+    }
+    
+    const binding = bindings[0]; // Use first binding
+    const implName = binding.implementation;
+    
+    // Get the service file
+    const serviceInfo = this.serviceMap.get(implName);
+    let fileUri: vscode.Uri;
+    
+    if (serviceInfo) {
+      fileUri = vscode.Uri.file(serviceInfo.file);
+    } else {
+      // Try to search for the implementation
+      const foundFiles = await searchForClass(implName);
+      if (foundFiles.length === 0) {
+        vscode.window.showErrorMessage(`Implementation file not found for ${implName}`);
+        return;
+      }
+      fileUri = foundFiles[0];
+    }
+    
+    // Open the file and navigate to the method
+    const document = await vscode.workspace.openTextDocument(fileUri);
+    const editor = await vscode.window.showTextDocument(document);
+    
+    // Search for the method in the file
+    const text = document.getText();
+    
+    // Try different method patterns
+    const patterns = [
+      // async method
+      new RegExp(`async\\s+${methodName}\\s*\\(`),
+      // regular method
+      new RegExp(`\\b${methodName}\\s*\\(`),
+      // public/private/protected method
+      new RegExp(`(?:public|private|protected)\\s+(?:async\\s+)?${methodName}\\s*\\(`),
+      // method with return type
+      new RegExp(`${methodName}\\s*\\([^)]*\\)\\s*:`)
+    ];
+    
+    let methodMatch: RegExpExecArray | null = null;
+    let matchedPattern: RegExp | undefined;
+    
+    for (const pattern of patterns) {
+      methodMatch = pattern.exec(text);
+      if (methodMatch) {
+        matchedPattern = pattern;
+        break;
+      }
+    }
+    
+    if (methodMatch) {
+      const position = document.positionAt(methodMatch.index!);
+      editor.selection = new vscode.Selection(position, position);
+      editor.revealRange(
+        new vscode.Range(position, position),
+        vscode.TextEditorRevealType.InCenter
+      );
+      this.outputChannel.appendLine(`Found method ${methodName} at line ${position.line + 1}`);
+    } else {
+      // If method not found, just go to the class
+      this.outputChannel.appendLine(`Method ${methodName} not found, navigating to class ${implName}`);
+      const classRegex = new RegExp(`(?:export\\s+)?(?:class|interface)\\s+${implName}\\b`);
+      const classMatch = classRegex.exec(text);
+      
+      if (classMatch) {
+        const position = document.positionAt(classMatch.index!);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(
+          new vscode.Range(position, position),
+          vscode.TextEditorRevealType.InCenter
+        );
+      }
+      
+      vscode.window.showInformationMessage(
+        `Method '${methodName}' not found in ${implName}, showing class instead`
+      );
+    }
   }
 
   async showBindings() {

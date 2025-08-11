@@ -82,6 +82,13 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Register command for method navigation
+  context.subscriptions.push(
+    vscode.commands.registerCommand('inverigator.goToMethod', (serviceName: string, methodName: string) => {
+      navigator?.goToMethod(serviceName, methodName);
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.showBindings, () => {
       navigator?.showBindings();

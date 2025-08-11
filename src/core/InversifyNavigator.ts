@@ -130,6 +130,14 @@ export class InversifyNavigator {
     return await this.navigator.getImplementationLocation(token);
   }
 
+  async getInjectionInfoForProperty(propertyName: string) {
+    return this.injectionMapper.getInjectionInfoForProperty(propertyName);
+  }
+
+  async goToMethod(serviceName: string, methodName: string) {
+    await this.navigator.goToMethod(serviceName, methodName);
+  }
+
   async showBindings() {
     await this.navigator.showBindings();
   }

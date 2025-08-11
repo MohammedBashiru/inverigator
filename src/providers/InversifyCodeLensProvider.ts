@@ -1,14 +1,12 @@
 import * as vscode from 'vscode';
-import * as ts from 'typescript';
 import { InversifyNavigator } from '../core/InversifyNavigator';
-import { createSourceFile } from '../utils/astUtils';
 
 export class InversifyCodeLensProvider implements vscode.CodeLensProvider {
   constructor(private navigator: InversifyNavigator) {}
 
   async provideCodeLenses(
     document: vscode.TextDocument,
-    token: vscode.CancellationToken
+    _token: vscode.CancellationToken
   ): Promise<vscode.CodeLens[]> {
     const codeLenses: vscode.CodeLens[] = [];
     
@@ -68,12 +66,41 @@ export class InversifyCodeLensProvider implements vscode.CodeLensProvider {
       }
     }
     
+    // Look for this.service.method() patterns
+    const thisServicePattern = /this\.([a-zA-Z0-9_]+)\.(\w+)\s*\(/g;
+    const processedLines = new Set<number>();
+    
+    while ((match = thisServicePattern.exec(text)) !== null) {
+      const serviceName = match[1];
+      const methodName = match[2];
+      const startPos = document.positionAt(match.index);
+      
+      // Only add one CodeLens per line
+      if (processedLines.has(startPos.line)) {
+        continue;
+      }
+      processedLines.add(startPos.line);
+      
+      // Check if we can find this service
+      const injectionInfo = await this.navigator.getInjectionInfoForProperty(serviceName);
+      if (injectionInfo) {
+        const range = new vscode.Range(startPos, startPos);
+        const lens = new vscode.CodeLens(range, {
+          title: `→ Go to ${serviceName}.${methodName}()`,
+          tooltip: `Navigate to ${methodName} method in ${serviceName}`,
+          command: 'inverigator.goToMethod',
+          arguments: [serviceName, methodName]
+        });
+        codeLenses.push(lens);
+      }
+    }
+    
     return codeLenses;
   }
 
   resolveCodeLens?(
     codeLens: vscode.CodeLens,
-    token: vscode.CancellationToken
+    _token: vscode.CancellationToken
   ): vscode.ProviderResult<vscode.CodeLens> {
     // CodeLens is already resolved in provideCodeLenses
     return codeLens;
