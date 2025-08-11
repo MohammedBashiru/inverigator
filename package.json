@@ -1,9 +1,19 @@
 {
   "icon": "icon.png",
   "name": "inverigator",
-  "displayName": "inverigator",
+  "displayName": "Inverigator",
   "description": "Jump to InversifyJS implementation from an injected type",
   "version": "0.0.1",
+  "publisher": "MohammedBashiru",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MohammedBashiru/inverigator"
+  },
+  "homepage": "https://github.com/MohammedBashiru/inverigator#readme",
+  "bugs": {
+    "url": "https://github.com/MohammedBashiru/inverigator/issues"
+  },
   "engines": {
     "vscode": "^1.103.0"
   },
@@ -81,6 +91,20 @@
           "minimum": 1,
           "maximum": 10,
           "description": "Maximum depth to follow imports when scanning for bindings in modular containers"
+        },
+        "inverigator.maxFilesToScan": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 100,
+          "maximum": 5000,
+          "description": "Maximum number of files to scan to prevent memory issues in large workspaces"
+        },
+        "inverigator.scanTimeout": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 5000,
+          "maximum": 120000,
+          "description": "Timeout in milliseconds for scanning operations"
         },
         "inverigator.enableCodeLens": {
           "type": "boolean",
