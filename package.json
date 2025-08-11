@@ -110,6 +110,12 @@
           "minimum": -1,
           "description": "Maximum number of files to scan (-1 for unlimited). Use unlimited carefully on large workspaces"
         },
+        "inverigator.maxContainerFilesToScan": {
+          "type": "number",
+          "default": 100,
+          "minimum": -1,
+          "description": "Maximum number of container reference files to scan (-1 for unlimited). Increase if bindings are missed in large workspaces"
+        },
         "inverigator.scanTimeout": {
           "type": "number",
           "default": 30000,

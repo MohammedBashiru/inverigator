@@ -248,9 +248,34 @@ export class BindingScanner {
   private async findRegistryFiles(dir: string): Promise<string[]> {
     const files: string[] = [];
     
+    // Check if the directory is within the workspace
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders) {
+      return files;
+    }
+    
+    // Convert absolute dir to workspace-relative path
+    let relativeDirPattern: string | null = null;
+    for (const folder of workspaceFolders) {
+      if (dir.startsWith(folder.uri.fsPath)) {
+        // Get the relative path from workspace root
+        relativeDirPattern = path.relative(folder.uri.fsPath, dir).replace(/\\/g, '/');
+        break;
+      }
+    }
+    
+    // If dir is not in workspace, try to use it as-is
+    if (relativeDirPattern === null) {
+      relativeDirPattern = vscode.workspace.asRelativePath(dir);
+    }
+    
     for (const pattern of FILE_PATTERNS.registry) {
-      const globPattern = path.join(dir, pattern).replace(/\\/g, '/');
-      const foundFiles = await findFiles(vscode.workspace.asRelativePath(globPattern), this.ignoreMatcher);
+      // Create a glob pattern relative to the workspace
+      const globPattern = relativeDirPattern ? 
+        `${relativeDirPattern}/${pattern}` : 
+        pattern;
+      
+      const foundFiles = await findFiles(globPattern, this.ignoreMatcher);
       files.push(...foundFiles.map(f => f.fsPath));
     }
     
@@ -688,8 +713,20 @@ export class BindingScanner {
     
     // Then scan container files (might have configuration)
     if (containerFiles.length > 0) {
-      this.outputChannel.appendLine('\nScanning files with container references:');
-      const filesToScan = containerFiles.slice(0, 20); // Limit container files to avoid over-scanning
+      this.outputChannel.appendLine(`\nScanning files with container references: ${containerFiles.length} files`);
+      
+      // Use a configurable limit or default to a reasonable number
+      const config = vscode.workspace.getConfiguration('inverigator');
+      const maxContainerFiles = config.get<number>('maxContainerFilesToScan', 100);
+      
+      const filesToScan = maxContainerFiles === -1 ? 
+        containerFiles : 
+        containerFiles.slice(0, maxContainerFiles);
+      
+      if (filesToScan.length < containerFiles.length) {
+        this.outputChannel.appendLine(`  Limiting to first ${filesToScan.length} container files (of ${containerFiles.length} total)`);
+      }
+      
       if (progress) {
         progress.report({ message: `Processing ${filesToScan.length} container files...` });
       }
