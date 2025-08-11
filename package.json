@@ -3,7 +3,7 @@
   "name": "inverigator",
   "displayName": "Inverigator",
   "description": "Jump to InversifyJS implementation from an injected type",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "publisher": "MohammedBashiru",
   "license": "MIT",
   "repository": {
@@ -108,15 +108,13 @@
           "type": "number",
           "default": 1000,
           "minimum": -1,
-          "maximum": 10000,
           "description": "Maximum number of files to scan (-1 for unlimited). Use unlimited carefully on large workspaces"
         },
         "inverigator.scanTimeout": {
           "type": "number",
           "default": 30000,
           "minimum": -1,
-          "maximum": 600000,
-          "description": "Timeout in milliseconds for scanning operations (-1 for unlimited). Use unlimited carefully"
+          "description": "Timeout in milliseconds for scanning operations (-1 for unlimited, or use large values like 600000 for 10 minutes)"
         },
         "inverigator.useCache": {
           "type": "boolean",
