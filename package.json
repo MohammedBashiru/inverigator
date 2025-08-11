@@ -3,7 +3,7 @@
   "name": "inverigator",
   "displayName": "Inverigator",
   "description": "Jump to InversifyJS implementation from an injected type",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "MohammedBashiru",
   "license": "MIT",
   "repository": {
@@ -143,6 +143,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show clickable 'Go to Implementation' links above InversifyJS injections and bindings"
+        },
+        "inverigator.verboseLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose logging for debugging purposes. Warning: This may impact performance"
         }
       }
     },

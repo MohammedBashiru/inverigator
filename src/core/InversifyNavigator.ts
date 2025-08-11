@@ -5,6 +5,7 @@ import { BindingScanner } from '../services/BindingScanner';
 import { ServiceIndexer } from '../services/ServiceIndexer';
 import { Navigator } from '../services/Navigator';
 import { InjectionMapper } from '../services/InjectionMapper';
+import { InjectedPropertyTracker } from '../services/InjectedPropertyTracker';
 
 export class InversifyNavigator {
   private bindingsMap: BindingsMap = new Map();
@@ -13,6 +14,7 @@ export class InversifyNavigator {
   private serviceIndexer: ServiceIndexer;
   private injectionMapper: InjectionMapper;
   private navigator: Navigator;
+  private propertyTracker: InjectedPropertyTracker;
   private fileWatcher?: vscode.FileSystemWatcher;
   private statusBarItem?: vscode.StatusBarItem;
 
@@ -25,6 +27,7 @@ export class InversifyNavigator {
     this.serviceIndexer = new ServiceIndexer(outputChannel, this.bindingScanner.getIgnoreMatcher());
     this.injectionMapper = new InjectionMapper(outputChannel, this.bindingScanner.getIgnoreMatcher());
     this.navigator = new Navigator(outputChannel, this.bindingsMap, this.serviceMap, this.injectionMapper, this.bindingScanner.getIgnoreMatcher());
+    this.propertyTracker = new InjectedPropertyTracker(outputChannel);
   }
 
   setStatusBarItem(statusBarItem: vscode.StatusBarItem) {
@@ -256,5 +259,6 @@ export class InversifyNavigator {
     if (this.fileWatcher) {
       this.fileWatcher.dispose();
     }
+    this.propertyTracker.clear();
   }
 }

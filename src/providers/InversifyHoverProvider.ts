@@ -1,8 +1,15 @@
 import * as vscode from 'vscode';
 import { InversifyNavigator } from '../core/InversifyNavigator';
+import { InjectedPropertyTracker } from '../services/InjectedPropertyTracker';
+import { shouldProcessIdentifier } from '../utils/identifierFilter';
 
 export class InversifyHoverProvider implements vscode.HoverProvider {
-  constructor(private navigator: InversifyNavigator) {}
+  private propertyTracker: InjectedPropertyTracker;
+  
+  constructor(private navigator: InversifyNavigator) {
+    const outputChannel = vscode.window.createOutputChannel('Inverigator-Hover', { log: true });
+    this.propertyTracker = new InjectedPropertyTracker(outputChannel);
+  }
 
   async provideHover(
     document: vscode.TextDocument,
@@ -40,11 +47,25 @@ export class InversifyHoverProvider implements vscode.HoverProvider {
         const start = match.index;
         const end = start + match[0].length;
         if (position.character >= start && position.character <= end) {
-          tokenToCheck = match[1]; // Just the property name
-          range = new vscode.Range(
-            position.line, start,
-            position.line, end
-          );
+          const propertyName = match[1];
+          
+          // Check if this property is actually injected
+          const className = this.propertyTracker.getClassNameAtPosition(document, position);
+          if (className) {
+            const isInjected = this.propertyTracker.isInjectedProperty(
+              document.fileName,
+              className,
+              propertyName
+            );
+            
+            if (isInjected) {
+              tokenToCheck = propertyName;
+              range = new vscode.Range(
+                position.line, start,
+                position.line, end
+              );
+            }
+          }
           break;
         }
       }
@@ -56,7 +77,14 @@ export class InversifyHoverProvider implements vscode.HoverProvider {
       if (!wordRange) {
         return undefined;
       }
-      tokenToCheck = document.getText(wordRange);
+      const word = document.getText(wordRange);
+      
+      // Skip if this is a built-in identifier
+      if (!shouldProcessIdentifier(word)) {
+        return undefined;
+      }
+      
+      tokenToCheck = word;
       range = wordRange;
     }
     

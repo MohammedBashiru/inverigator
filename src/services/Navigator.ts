@@ -4,6 +4,7 @@ import { Binding, BindingsMap, ServiceMap } from '../types';
 import { searchForClass } from '../utils/fileUtils';
 import { InjectionMapper } from './InjectionMapper';
 import { IgnorePatternMatcher } from '../utils/ignorePatterns';
+import { shouldProcessIdentifier } from '../utils/identifierFilter';
 
 export class Navigator {
   private ignoreMatcher: IgnorePatternMatcher;
@@ -302,7 +303,9 @@ export class Navigator {
         
         // Find the method in the file
         const fileText = doc.getText();
-        const methodRegex = new RegExp(`\\b${methodName}\\s*\\(`);
+        // Escape special regex characters in method name
+        const escapedMethodName = methodName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const methodRegex = new RegExp(`\\b${escapedMethodName}\\s*\\(`);
         const methodMatch = methodRegex.exec(fileText);
         
         if (methodMatch) {
@@ -406,7 +409,18 @@ export class Navigator {
   }
 
   async getImplementationLocation(token: string): Promise<{ file: string; line: number } | undefined> {
-    this.outputChannel.appendLine(`Looking for implementation of token: ${token}`);
+    // Skip built-in identifiers to prevent unnecessary lookups
+    if (!shouldProcessIdentifier(token)) {
+      return undefined;
+    }
+    
+    // Only log if verbose logging is enabled or for actual InversifyJS tokens
+    const config = vscode.workspace.getConfiguration('inverigator');
+    const verboseLogging = config.get<boolean>('verboseLogging', false);
+    
+    if (verboseLogging || token.startsWith('TYPES.') || token.startsWith('I') || token.includes('Service') || token.includes('Repository')) {
+      this.outputChannel.appendLine(`Looking for implementation of token: ${token}`);
+    }
     
     // First, check if this is an interface that maps to a token
     if (this.injectionMapper && token.startsWith('I')) {
@@ -447,6 +461,11 @@ export class Navigator {
   }
 
   async goToMethod(serviceName: string, methodName: string) {
+    // Skip built-in methods
+    if (!shouldProcessIdentifier(methodName)) {
+      return;
+    }
+    
     this.outputChannel.appendLine(`\n=== Method Navigation Request ===`);
     this.outputChannel.appendLine(`Looking for ${serviceName}.${methodName}()`);
     

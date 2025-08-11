@@ -1,8 +1,15 @@
 import * as vscode from 'vscode';
 import { InversifyNavigator } from '../core/InversifyNavigator';
+import { InjectedPropertyTracker } from '../services/InjectedPropertyTracker';
+import { shouldProcessIdentifier } from '../utils/identifierFilter';
 
 export class InversifyCodeLensProvider implements vscode.CodeLensProvider {
-  constructor(private navigator: InversifyNavigator) {}
+  private propertyTracker: InjectedPropertyTracker;
+  
+  constructor(private navigator: InversifyNavigator) {
+    const outputChannel = vscode.window.createOutputChannel('Inverigator-CodeLens', { log: true });
+    this.propertyTracker = new InjectedPropertyTracker(outputChannel);
+  }
 
   async provideCodeLenses(
     document: vscode.TextDocument,
@@ -80,6 +87,29 @@ export class InversifyCodeLensProvider implements vscode.CodeLensProvider {
         continue;
       }
       processedLines.add(startPos.line);
+      
+      // Skip if this is a built-in method
+      if (!shouldProcessIdentifier(methodName)) {
+        continue;
+      }
+      
+      // Get the class context for this position
+      const className = this.propertyTracker.getClassNameAtPosition(document, startPos);
+      if (!className) {
+        continue;
+      }
+      
+      // Check if this property is actually injected
+      const isInjected = this.propertyTracker.isInjectedProperty(
+        document.fileName,
+        className,
+        serviceName
+      );
+      
+      if (!isInjected) {
+        // Not an injected service, skip it
+        continue;
+      }
       
       // Check if we can find this service
       const injectionInfo = await this.navigator.getInjectionInfoForProperty(serviceName);
