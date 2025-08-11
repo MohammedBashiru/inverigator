@@ -41,7 +41,9 @@ export const COMMANDS = {
   showBindings: 'inverigator.showBindings',
   rescan: 'inverigator.rescan',
   showInjections: 'inverigator.showInjections',
-  generateIgnoreFile: 'inverigator.generateIgnoreFile'
+  generateIgnoreFile: 'inverigator.generateIgnoreFile',
+  showCacheStats: 'inverigator.showCacheStats',
+  clearCache: 'inverigator.clearCache'
 };
 
 export const PATTERNS = {

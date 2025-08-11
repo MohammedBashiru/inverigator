@@ -17,8 +17,9 @@ export class Navigator {
   }
 
   async goToImplementationForToken(token: string) {
-    this.outputChannel.appendLine(`\n=== Navigation Request (from CodeLens) ===`);
-    this.outputChannel.appendLine(`Looking for token: '${token}'`);
+    try {
+      this.outputChannel.appendLine(`\n=== Navigation Request (from CodeLens) ===`);
+      this.outputChannel.appendLine(`Looking for token: '${token}'`);
     
     // First, check if this is an interface that maps to a token
     if (this.injectionMapper && token.startsWith('I')) {
@@ -44,14 +45,19 @@ export class Navigator {
     }
     
     vscode.window.showErrorMessage(`No implementation found for: ${token}`);
+    } catch (error) {
+      this.outputChannel.appendLine(`Error during token navigation: ${error}`);
+      vscode.window.showErrorMessage(`Inverigator: Navigation failed - ${error}`);
+    }
   }
 
   async goToImplementation() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-      vscode.window.showErrorMessage('No active editor');
-      return;
-    }
+    try {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showErrorMessage('No active editor');
+        return;
+      }
 
     const position = editor.selection.active;
     const document = editor.document;
@@ -237,6 +243,10 @@ export class Navigator {
     } else {
       await this.handleBindings(bindings, symbol);
     }
+    } catch (error) {
+      this.outputChannel.appendLine(`Error during navigation: ${error}`);
+      vscode.window.showErrorMessage(`Inverigator: Navigation failed - ${error}`);
+    }
   }
 
   private findInjectionTokenForProperty(propertyName: string, fileText: string): string | null {
@@ -366,21 +376,26 @@ export class Navigator {
   }
 
   private async openFileAndNavigate(uri: vscode.Uri, className: string) {
-    const document = await vscode.workspace.openTextDocument(uri);
-    const editor = await vscode.window.showTextDocument(document);
+    try {
+      const document = await vscode.workspace.openTextDocument(uri);
+      const editor = await vscode.window.showTextDocument(document);
 
-    // Try to find the class/interface definition and jump to it
-    const text = document.getText();
-    const classRegex = new RegExp(`(?:export\\s+)?(?:class|interface)\\s+${className}\\b`);
-    const match = classRegex.exec(text);
+      // Try to find the class/interface definition and jump to it
+      const text = document.getText();
+      const classRegex = new RegExp(`(?:export\\s+)?(?:class|interface)\\s+${className}\\b`);
+      const match = classRegex.exec(text);
 
-    if (match) {
-      const position = document.positionAt(match.index!);
-      editor.selection = new vscode.Selection(position, position);
-      editor.revealRange(
-        new vscode.Range(position, position), 
-        vscode.TextEditorRevealType.InCenter
-      );
+      if (match) {
+        const position = document.positionAt(match.index!);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(
+          new vscode.Range(position, position), 
+          vscode.TextEditorRevealType.InCenter
+        );
+      }
+    } catch (error) {
+      this.outputChannel.appendLine(`Error opening file ${uri.fsPath}: ${error}`);
+      vscode.window.showErrorMessage(`Inverigator: Could not open file - ${error}`);
     }
   }
 

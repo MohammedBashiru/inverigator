@@ -16,8 +16,8 @@ export function activate(context: vscode.ExtensionContext) {
   
   // Create status bar item
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBarItem.text = '$(sync~spin) Inverigator: Scanning...';
-  statusBarItem.tooltip = 'Inverigator is scanning for InversifyJS bindings';
+  statusBarItem.text = '$(sync~spin) Inverigator: Initializing...';
+  statusBarItem.tooltip = 'Inverigator is initializing and scanning for InversifyJS bindings';
   statusBarItem.show();
   
   context.subscriptions.push(outputChannel, diagnostics, statusBarItem);
@@ -26,10 +26,53 @@ export function activate(context: vscode.ExtensionContext) {
   navigator.setStatusBarItem(statusBarItem);
   
   // Initialize the navigator
-  navigator.initialize().then(() => {
+  navigator.initialize().then(async () => {
     outputChannel.appendLine(`${EXTENSION_NAME} extension activated successfully`);
     outputChannel.appendLine(`Scanned ${navigator!.getProcessedFilesCount()} files`);
     outputChannel.appendLine(`Found ${navigator!.getBindingsCount()} bindings`);
+    
+    // Check if this was from cache or fresh scan
+    const stats = await navigator!.getCacheStats();
+    const isFirstInstall = !stats.exists;
+    
+    if (stats.exists && stats.age && stats.age < 60000) {
+      outputChannel.appendLine('Loaded from fresh cache (< 1 minute old)');
+    } else if (stats.exists) {
+      const ageMinutes = Math.round((stats.age || 0) / 60000);
+      outputChannel.appendLine(`Loaded from cache (${ageMinutes} minutes old)`);
+    } else {
+      outputChannel.appendLine('Initial scan completed (cache created)');
+    }
+    
+    // Show welcome message on first installation
+    const config = vscode.workspace.getConfiguration('inverigator');
+    const showWelcome = config.get<boolean>('showWelcomeMessage', true);
+    
+    if (isFirstInstall && showWelcome) {
+      const bindingCount = navigator!.getBindingsCount();
+      if (bindingCount > 0) {
+        vscode.window.showInformationMessage(
+          `🎉 Inverigator initialized! Found ${bindingCount} InversifyJS bindings. Use Alt+F12 to navigate to implementations.`,
+          'Show Bindings',
+          'View Commands'
+        ).then(selection => {
+          if (selection === 'Show Bindings') {
+            vscode.commands.executeCommand(COMMANDS.showBindings);
+          } else if (selection === 'View Commands') {
+            vscode.commands.executeCommand('workbench.action.showCommands', 'Inverigator');
+          }
+        });
+      } else {
+        vscode.window.showInformationMessage(
+          'Inverigator initialized! No InversifyJS bindings found yet. They will be detected automatically as you work.',
+          'View Documentation'
+        ).then(selection => {
+          if (selection === 'View Documentation') {
+            vscode.env.openExternal(vscode.Uri.parse('https://github.com/your-repo/inverigator'));
+          }
+        });
+      }
+    }
     
     // Update status bar
     if (statusBarItem) {
@@ -137,6 +180,19 @@ export function activate(context: vscode.ExtensionContext) {
       } catch (error) {
         vscode.window.showErrorMessage(`Failed to create .inverigatorignore: ${error}`);
       }
+    })
+  );
+
+  // Register cache management commands
+  context.subscriptions.push(
+    vscode.commands.registerCommand('inverigator.showCacheStats', () => {
+      navigator?.showCacheStats();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('inverigator.clearCache', () => {
+      navigator?.clearCache();
     })
   );
 }

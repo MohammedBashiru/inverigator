@@ -165,6 +165,50 @@ Show clickable "Go to Implementation" links above InversifyJS injections and bin
 
 **Default:** `true`
 
+#### `inverigator.maxFilesToScan`
+Maximum number of files to scan to prevent memory issues in large workspaces. Use `-1` for unlimited.
+
+**Default:** `1000` (Range: -1 to 10000)
+
+#### `inverigator.scanTimeout`
+Timeout in milliseconds for scanning operations. Use `-1` for unlimited.
+
+**Default:** `30000` (Range: -1 to 600000)
+
+#### `inverigator.useCache`
+Use cached bindings from `.inverigator` folder for faster startup.
+
+**Default:** `true`
+
+#### `inverigator.cacheMaxAge`
+Maximum age of cache in milliseconds before it's considered stale.
+
+**Default:** `3600000` (1 hour)
+
+#### `inverigator.showWelcomeMessage`
+Show welcome message with binding count on first installation.
+
+**Default:** `true`
+
+### Caching System
+
+Inverigator uses an intelligent caching system to provide instant startup after the initial scan:
+
+- **Cache Location**: `.inverigator` folder in your project root
+- **Cache Contents**: 
+  - `bindings.json` - All discovered InversifyJS bindings
+  - `injections.json` - Interface-to-token mappings
+  - `metadata.json` - Cache version and configuration hash
+- **Cache Invalidation**: Automatic when:
+  - Configuration settings change
+  - Container files are modified (with auto-scan enabled)
+  - Cache age exceeds configured maximum
+- **Manual Cache Management**:
+  - `Inverigator: Show Cache Statistics` - View cache age and size
+  - `Inverigator: Clear Cache` - Force cache rebuild on next scan
+
+**Note**: Add `.inverigator/` to your `.gitignore` file to exclude cache from version control.
+
 ### Ignore Patterns
 
 Create a `.inverigatorignore` file in your project root to exclude specific files or directories from scanning. The file uses gitignore-style syntax.

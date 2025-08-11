@@ -32,32 +32,45 @@ export class InversifyNavigator {
   }
 
   async initialize() {
+    // Check if this is a fresh installation (no cache exists)
+    const hasCachedData = await this.bindingScanner.hasCachedData();
+    const config = vscode.workspace.getConfiguration('inverigator');
+    const useCache = config.get<boolean>('useCache', true);
+    
+    // Always scan on first installation or when cache is disabled
+    const shouldForceInitialScan = !hasCachedData || !useCache;
+    
+    if (shouldForceInitialScan) {
+      this.outputChannel.appendLine('No cache found or cache disabled - performing initial scan');
+    }
+    
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
       title: "Inverigator",
       cancellable: false
     }, async (progress) => {
       progress.report({ message: "Initializing InversifyJS navigation..." });
-      await this.scanAll(progress);
+      await this.scanAll(progress, shouldForceInitialScan);
       this.setupFileWatchers();
       return;
     });
   }
 
-  private async scanAll(progress?: vscode.Progress<{ message?: string; increment?: number }>) {
+  private async scanAll(progress?: vscode.Progress<{ message?: string; increment?: number }>, forceFullScan: boolean = false) {
     const config = vscode.workspace.getConfiguration('inverigator');
     const patterns = config.get<string[]>('containerPaths') || DEFAULT_CONFIG.containerPaths;
     const maxDepth = config.get<number>('maxScanDepth', DEFAULT_CONFIG.maxScanDepth);
 
-    this.outputChannel.appendLine(`\n=== Starting Full Scan ===`);
+    this.outputChannel.appendLine(`\n=== Starting ${forceFullScan ? 'Initial' : 'Full'} Scan ===`);
     this.outputChannel.appendLine(`Container patterns: ${patterns.join(', ')}`);
     this.outputChannel.appendLine(`Max scan depth: ${maxDepth}`);
+    this.outputChannel.appendLine(`Force full scan: ${forceFullScan}`);
 
-    // Scan for bindings
+    // Scan for bindings (will use cache if available and not forcing full scan)
     if (progress) {
       progress.report({ message: "Scanning for InversifyJS bindings..." });
     }
-    this.bindingsMap = await this.bindingScanner.scan(patterns, maxDepth, progress);
+    this.bindingsMap = await this.bindingScanner.scan(patterns, maxDepth, progress, forceFullScan);
 
     // Index services
     if (progress) {
@@ -115,7 +128,19 @@ export class InversifyNavigator {
 
   private shouldRescan(filePath: string): boolean {
     const keywords = ['registry', 'Registry', 'container', 'Container', 'bindings', 'Bindings'];
-    return keywords.some(keyword => filePath.includes(keyword));
+    const shouldRescan = keywords.some(keyword => filePath.includes(keyword));
+    
+    // Invalidate cache if we're rescanning due to file changes
+    if (shouldRescan) {
+      this.invalidateCache([filePath]);
+    }
+    
+    return shouldRescan;
+  }
+  
+  private async invalidateCache(files?: string[]) {
+    await this.bindingScanner.clearCache();
+    this.outputChannel.appendLine('Cache invalidated due to file changes');
   }
 
   async goToImplementation() {
@@ -167,6 +192,9 @@ export class InversifyNavigator {
   }
 
   async rescan() {
+    // Clear cache before rescanning
+    await this.bindingScanner.clearCache();
+    
     // Update status bar to show scanning
     if (this.statusBarItem) {
       this.statusBarItem.text = '$(sync~spin) Inverigator: Rescanning...';
@@ -200,6 +228,28 @@ export class InversifyNavigator {
 
   getProcessedFilesCount(): number {
     return this.bindingScanner.getProcessedFilesCount();
+  }
+  
+  async getCacheStats() {
+    return await this.bindingScanner.getCacheStats();
+  }
+  
+  async showCacheStats() {
+    const stats = await this.bindingScanner.getCacheStats();
+    if (stats.exists) {
+      const ageInMinutes = Math.round((stats.age || 0) / 60000);
+      const sizeInKB = Math.round((stats.size || 0) / 1024);
+      vscode.window.showInformationMessage(
+        `Cache: ${stats.bindingsCount} bindings, ${stats.injectionsCount} injections, ${sizeInKB}KB, ${ageInMinutes}min old`
+      );
+    } else {
+      vscode.window.showInformationMessage('No cache exists. Run a scan to create cache.');
+    }
+  }
+  
+  async clearCache() {
+    await this.bindingScanner.clearCache();
+    vscode.window.showInformationMessage('Cache cleared. Next scan will rebuild the cache.');
   }
 
   dispose() {

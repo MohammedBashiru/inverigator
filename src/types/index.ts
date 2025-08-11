@@ -24,3 +24,11 @@ export interface NavigationResult {
 
 export type BindingsMap = Map<string, Binding[]>;
 export type ServiceMap = Map<string, ServiceInfo>;
+
+export interface InjectionMapping {
+  interfaceName: string;
+  token: string;
+  propertyName?: string;
+  file: string;
+  line: number;
+}

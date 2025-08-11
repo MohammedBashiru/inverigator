@@ -6,12 +6,18 @@ import { FILE_PATTERNS, PATTERNS } from '../constants';
 import { createSourceFile, extractIdentifier } from '../utils/astUtils';
 import { findFiles, resolveImportPath } from '../utils/fileUtils';
 import { IgnorePatternMatcher } from '../utils/ignorePatterns';
+import { CacheService } from './CacheService';
 
 export class BindingScanner {
   private bindingsMap: BindingsMap = new Map();
   private processedFiles: Set<string> = new Set();
   private importedFunctions: Set<string> = new Set();
   private ignoreMatcher: IgnorePatternMatcher;
+  private scanStartTime: number = 0;
+  private maxFilesToScan: number = 1000;
+  private scanTimeout: number = 30000;
+  private cacheService: CacheService | null = null;
+  private useCache: boolean = true;
 
   constructor(
     private outputChannel: vscode.OutputChannel,
@@ -22,14 +28,77 @@ export class BindingScanner {
     if (info.hasIgnoreFile) {
       this.outputChannel.appendLine(`Loaded .inverigatorignore file with ${info.patternCount} patterns`);
     }
+    
+    // Initialize cache service if we have a workspace
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (workspaceFolder) {
+      this.cacheService = new CacheService(workspaceFolder.uri.fsPath, this.outputChannel);
+    }
   }
 
-  async scan(patterns: string[], maxDepth: number, progress?: vscode.Progress<{ message?: string; increment?: number }>): Promise<BindingsMap> {
+  async scan(patterns: string[], maxDepth: number, progress?: vscode.Progress<{ message?: string; increment?: number }>, forceFullScan: boolean = false): Promise<BindingsMap> {
     this.bindingsMap.clear();
     this.processedFiles.clear();
     this.importedFunctions.clear();
+    this.scanStartTime = Date.now();
+    
+    // Load config values
+    const config = vscode.workspace.getConfiguration('inverigator');
+    this.maxFilesToScan = config.get<number>('maxFilesToScan', 1000);
+    this.scanTimeout = config.get<number>('scanTimeout', 30000);
+    this.useCache = config.get<boolean>('useCache', true);
+    
+    // Handle unlimited values
+    if (this.maxFilesToScan === -1) {
+      this.maxFilesToScan = Number.MAX_SAFE_INTEGER;
+      this.outputChannel.appendLine('Max files to scan: unlimited');
+    }
+    if (this.scanTimeout === -1) {
+      this.scanTimeout = Number.MAX_SAFE_INTEGER;
+      this.outputChannel.appendLine('Scan timeout: unlimited');
+    }
 
     this.outputChannel.appendLine('\n=== Starting Binding Scan ===');
+    this.outputChannel.appendLine(`Max files to scan: ${this.maxFilesToScan === Number.MAX_SAFE_INTEGER ? 'unlimited' : this.maxFilesToScan}`);
+    this.outputChannel.appendLine(`Scan timeout: ${this.scanTimeout === Number.MAX_SAFE_INTEGER ? 'unlimited' : this.scanTimeout + 'ms'}`);
+    this.outputChannel.appendLine(`Use cache: ${this.useCache}`);
+    
+    // Try to load from cache first (unless forced to do full scan)
+    if (this.useCache && this.cacheService && !forceFullScan) {
+      const cacheData = await this.cacheService.loadCache();
+      if (cacheData) {
+        this.outputChannel.appendLine('\nLoaded bindings from cache');
+        this.outputChannel.appendLine(`  Cached bindings: ${cacheData.bindings.size}`);
+        this.outputChannel.appendLine(`  Cache age: ${Math.round((Date.now() - cacheData.timestamp) / 1000)}s`);
+        
+        // Check if cache is still valid (e.g., not older than 1 hour)
+        const maxCacheAge = config.get<number>('cacheMaxAge', 3600000); // 1 hour default
+        if (await this.cacheService.isCacheValid(maxCacheAge)) {
+          this.bindingsMap = cacheData.bindings;
+          this.processedFiles = new Set(cacheData.scannedFiles);
+          
+          // Log cached bindings
+          this.outputChannel.appendLine(`\n=== Cached Bindings ===`);
+          let bindingCount = 0;
+          this.bindingsMap.forEach((bindings) => {
+            bindings.forEach(binding => {
+              this.outputChannel.appendLine(`  ${binding.token} → ${binding.implementation}`);
+              bindingCount++;
+            });
+          });
+          this.outputChannel.appendLine(`Total cached bindings: ${bindingCount}`);
+          this.outputChannel.appendLine(`=== End Cached Bindings ===\n`);
+          
+          return this.bindingsMap;
+        } else {
+          this.outputChannel.appendLine('Cache is invalid or expired, performing full scan');
+        }
+      } else {
+        this.outputChannel.appendLine('No cache found, performing full scan');
+      }
+    } else if (forceFullScan) {
+      this.outputChannel.appendLine('Forced full scan - bypassing cache');
+    }
     
     // Use content-based search as the primary strategy
     // This is more reliable than pattern-based for finding all bindings
@@ -69,11 +138,38 @@ export class BindingScanner {
     this.outputChannel.appendLine(
       `Found ${this.bindingsMap.size} unique keys with bindings across ${this.processedFiles.size} files`
     );
+    
+    // Save to cache if enabled
+    if (this.useCache && this.cacheService && this.bindingsMap.size > 0) {
+      try {
+        // For now, we're not caching injections separately, but we could extend this
+        await this.cacheService.saveCache(
+          this.bindingsMap,
+          new Map(), // Empty injections map for now
+          Array.from(this.processedFiles)
+        );
+        this.outputChannel.appendLine('Bindings saved to cache');
+      } catch (error) {
+        this.outputChannel.appendLine(`Failed to save cache: ${error}`);
+      }
+    }
 
     return this.bindingsMap;
   }
 
   private async scanContainerFile(filePath: string, depth: number, maxDepth: number) {
+    // Check file limit
+    if (this.processedFiles.size >= this.maxFilesToScan) {
+      this.outputChannel.appendLine(`⚠️ Reached max file limit (${this.maxFilesToScan} files)`);
+      return;
+    }
+    
+    // Check timeout
+    if (Date.now() - this.scanStartTime > this.scanTimeout) {
+      this.outputChannel.appendLine(`⚠️ Scan timeout reached (${this.scanTimeout}ms)`);
+      return;
+    }
+    
     // Skip ignored files
     if (this.ignoreMatcher.shouldIgnore(filePath)) {
       return;
@@ -612,5 +708,26 @@ export class BindingScanner {
   
   getProcessedFilesCount(): number {
     return this.processedFiles.size;
+  }
+  
+  async clearCache(): Promise<void> {
+    if (this.cacheService) {
+      await this.cacheService.clearCache();
+      this.outputChannel.appendLine('Cache cleared');
+    }
+  }
+  
+  async getCacheStats(): Promise<any> {
+    if (this.cacheService) {
+      return await this.cacheService.getCacheStats();
+    }
+    return { exists: false };
+  }
+  
+  async hasCachedData(): Promise<boolean> {
+    if (this.cacheService) {
+      return await this.cacheService.cacheExists();
+    }
+    return false;
   }
 }
